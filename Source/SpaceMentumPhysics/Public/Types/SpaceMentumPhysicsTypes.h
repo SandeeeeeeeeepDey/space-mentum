@@ -159,3 +159,72 @@ struct SPACEMENTUMPHYSICS_API FMaceOrbitState
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mace|State")
 	EMaceSpinDirection HeldSpinDirection = EMaceSpinDirection::None;
 };
+
+/**
+ * Single predicted trajectory point along the forward tunnel corridor.
+ * Used by trajectory visualizers, debug HUD, and predictive AI agents.
+ */
+USTRUCT(BlueprintType)
+struct SPACEMENTUMPHYSICS_API FTrajectoryPoint
+{
+	GENERATED_BODY()
+
+	/** World position at sample time. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Trajectory")
+	FVector Position = FVector::ZeroVector;
+
+	/** World velocity at sample time. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Trajectory")
+	FVector Velocity = FVector::ZeroVector;
+
+	/** Time offset (seconds) from current simulation tick. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Trajectory")
+	float TimeSeconds = 0.0f;
+};
+
+/**
+ * Real-time physics telemetry bundle.
+ * Pure data struct designed for debug HUDs, replay logs, and AI observation vectors.
+ */
+USTRUCT(BlueprintType)
+struct SPACEMENTUMPHYSICS_API FMaceTelemetry
+{
+	GENERATED_BODY()
+
+	/** Orbit angle in degrees [0, 360). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Telemetry")
+	float OrbitAngleDeg = 0.0f;
+
+	/** Instantaneous angular speed (deg/s). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Telemetry")
+	float AngularSpeedDegPerSec = 0.0f;
+
+	/** Current rotational cadence (revolutions per minute). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Telemetry")
+	float RotationsPerMinute = 0.0f;
+
+	/** World location of the rotating mace head. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Telemetry")
+	FVector MaceHeadWorldPosition = FVector::ZeroVector;
+
+	/** Tangential linear velocity of the mace head in world space (cm/s). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Telemetry")
+	FVector TangentialVelocityWorld = FVector::ZeroVector;
+
+	/** Current lateral dodging velocity (cm/s). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Telemetry")
+	FVector LateralVelocity = FVector::ZeroVector;
+
+	/** Relentless forward speed along tunnel (+X, cm/s). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Telemetry")
+	float ForwardSpeedCmPerSec = 0.0f;
+
+	/** Active player input direction. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Telemetry")
+	EMaceSpinDirection SpinDirection = EMaceSpinDirection::None;
+
+	/** Active kick model being evaluated. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Telemetry")
+	EMomentumKickModel KickModel = EMomentumKickModel::ReactionRecoil;
+};
+

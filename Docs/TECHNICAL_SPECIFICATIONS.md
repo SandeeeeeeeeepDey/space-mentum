@@ -47,17 +47,27 @@ graph LR
 | :--- | :--- | :--- | :--- | :--- |
 | `IA_SpinCounterClockwise` | bool (hold) | **A** | Left-thumb hold zone | Wind mace CCW |
 | `IA_SpinClockwise` | bool (hold) | **D** | Right-thumb hold zone | Wind mace CW |
-| *(release, nothing held)* | n/a | let go | lift thumb | Mace stops → momentum kick |
+| `IA_ToggleKickModel` | bool (trigger) | **M** | Optional debug button | Toggle ReactionRecoil vs CarryAlong |
+| *(release, nothing held)* | n/a | let go | lift thumb | Mace stops → momentum kick fires |
 
-- Both held at once: **TBD in Step 2.** Proposal: the most recently pressed button wins.
-- Step 2 creates the actions and mapping context in C++, so no editor assets are needed yet. Once the editor is in use they get mirrored as assets in `Content/Core/Input/`.
+- **Both held at once (SOCD Resolution):** Locked as **Last-Input-Priority with fallback to held**. If A is held and D is tapped, the spin immediately flips to Clockwise; when D is released, it seamlessly falls back to Counter-Clockwise without dropping the spin. When both are released, the kick fires immediately.
+- Procedural Enhanced Input actions and mapping context (`IMC_SpaceDiving_Procedural`) are generated directly in C++ if editor assets are not yet assigned.
 
-## 5. Physics & Determinism
+## 5. Physics, Determinism & Tooling
 
-- `DefaultGravityZ = 0`: deep space.
+- `DefaultGravityZ = 0`: deep space zero gravity.
 - Chaos substepping at **1/120 s**, up to 8 substeps. This keeps the fast mace head from tunnelling through thin obstacles.
 - `bEnableEnhancedDeterminism = True` for replays, ghost runs, and leaderboard validation.
-- Orbit and kick state are plain `USTRUCT`s (`FMaceOrbitState`) so they can be recorded.
+- Orbit and kick state are plain `USTRUCT`s (`FMaceOrbitState`, `FMaceTelemetry`, `FTrajectoryPoint`).
+- **Closed-Form Trajectory Prediction:** Analytical integration in `FTrajectoryPredictor::PredictTrajectoryCurve` projects the astronaut's flight path over a discrete horizon (e.g. 1.5s) without frame-rate dependent error.
+- **Real-Time Debug Visualizer (`FSpaceMentumDebugVisualizer`):**
+  - Orbit ring in local YZ.
+  - Speed-reactive mace head sphere and tether cable.
+  - Tangential velocity vector arrow (yellow).
+  - Instantaneous kick direction preview arrow (green).
+  - Projected flight path curve through the forward corridor (cyan).
+  - Live on-screen HUD telemetry lines displaying RPM, speed, angle, and active kick model.
+
 
 ## 6. Coding Standard
 

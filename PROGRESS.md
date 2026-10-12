@@ -9,32 +9,38 @@
 
 ## ▶ Resume Here
 
-**Current step:** Step 1 (UE 5.8 C++ project scaffold) is ✅ **COMPLETE** and committed.
-**Status:** ⏸ Waiting for the Creator: install UE 5.8, compile once, and answer the open questions below.
-**Next action (Step 2: core feel prototype, C++):**
-1. `UMaceOrbitComponent`: enable tick, integrate ω/θ from held spin direction, expose mace head world position.
-2. `UMomentumTransferComponent`: on release, compute `J` with `FTrajectoryPredictor` + `EMomentumKickModel`, apply to lateral velocity, damp it.
-3. `UForwardDriftComponent`: compose velocity = forward X + lateral YZ; set CharacterMovement to Flying.
-4. `ASpacePlayerController`: create `IA_SpinCounterClockwise`/`IA_SpinClockwise` + IMC in C++, bind A/D (hold/release).
-5. `ASpaceAstronautCharacter`: push `EquippedMace` tuning into components; draw debug mace + tether.
-6. Decide the "both A and D held" rule (proposal: the most recently pressed wins).
+**Current step:** Step 2 (Core Feel Prototype in C++) is ✅ **COMPLETE**.
+**Status:** 🚀 Ready for Step 3 (Greybox Level `L_Prototype_Greybox` in Unreal Editor 5.8).
+**Next action (Step 3: Greybox Level & In-Editor Verification):**
+1. Open `SpaceMentum.uproject` in **Unreal Engine 5.8**.
+2. Create `Content/Core/Maps/L_Prototype_Greybox.umap` with a high-contrast deep space skybox and cylindrical / tunnel reference markers.
+3. Verify that `ASpaceGameModeBase` spawns `ASpaceAstronautCharacter` with `ASpacePlayerController`.
+4. Test the two-button A/D mace spin rhythm:
+   - Hold A: winds CCW (cyan -> ultraviolet mace head).
+   - Let go: crisp lateral kick whiplash!
+   - Press M: toggle between `ReactionRecoil` (GDD default) and `CarryAlong` (yank) to compare physical feel.
+5. Mirror procedural C++ input assets into `Content/Core/Input/` (`IA_SpinCounterClockwise`, `IA_SpinClockwise`, `IMC_DefaultSpaceDiving`).
+6. Create `DA_Mace_Default` asset in `Content/Abilities/Maces/` and assign to astronaut pawn.
 
 ---
 
-## Locked Decisions (Step 1 kickoff — 2026-10-11)
+## Locked Decisions (Step 2 update — 2026-10-12)
 
-| Topic | Decision | Creator quote |
+| Topic | Decision | Creator quote / Technical Rationale |
 | :--- | :--- | :--- |
-| Step 1 scope | Code-only UE5 C++ scaffold: `.uproject`, 3 modules, Config, Content layout, Docs | — |
+| Step 1 scope | Code-only UE5 C++ scaffold: `.uproject`, 3 modules, Config, Content layout, Docs | Done ✅ |
+| Step 2 scope | Core feel prototype C++: orbit integration, whiplash kick, drift composition, Enhanced Input, SOCD resolution, debug telemetry | Done ✅ |
 | Engine | **Unreal Engine 5.8** (`EngineAssociation: "5.8"`) | *"Unreal Engine 5.8, released in June 2026. is what i want to choose"* |
 | Orbit plane | **Full 3D 360° cylindrical**: mace orbits in local YZ plane; release angle steers in Y and Z | — |
 | Input | **Two buttons only**: A = spin counter-clockwise, D = spin clockwise. Letting go = stop = release = kick | *"for pc A and D looks good. only two buttons for now to spin the mace, moment of stopping is the moment of release. everything can be controles by this i think."* |
-| Platform | **Undecided** (PC vs mobile). Input is designed as 2 abstract actions so both are trivial to map | *"im still not sure which would make more sense for me, a mobile game or a pc game"* |
+| SOCD Rule | **Last-Input-Priority with fallback to held**: holding A then tapping D switches spin to CW; releasing D reverts to CCW; releasing both fires the kick. | Ensures zero deadzone and zero accidental releases during fast directional switches. |
+| Kick Model Calibration | Exposed runtime toggle (press **M** or call `ToggleKickModel()`) between `ReactionRecoil` (GDD §3.1.2) and `CarryAlong`. | Allows the Creator to compare both physical sensations in play before final commitment. |
+| Telemetry & Gizmos | Real-time 3D orbit ring, tether cable, tangential vector, kick arrow, analytical trajectory curve, and HUD telemetry overlay (`FSpaceMentumDebugVisualizer`). | Instant visual verification of physical determinism and feel. |
 
 ### Open questions for the Creator
-- [ ] **Kick direction:** GDD §3.1.2 says the kick goes *opposite* the mace's travel (`J = -α·m·v_t`). A literal "stop the mace" yanks you *along* its travel. Exposed as `EMomentumKickModel` (default = GDD). Decide after feeling both in Step 2.
+- [ ] **Kick direction feel test:** Playtest both models in `L_Prototype_Greybox` (press **M** to toggle) and decide whether `ReactionRecoil` or `CarryAlong` feels more satisfying.
 - [ ] **Platform:** PC first (recommended for prototyping / Lumen quality) vs mobile.
-- [ ] Move `GAME_DESIGN_DOCUMENT.md` into `Docs/` per GDD §4? (not done yet — file left at root)
+
 
 ---
 
@@ -100,16 +106,27 @@
 - [x] Update GDD §5 checklist with locked decisions + new creator quotes
 - [x] Git commit: `feat: Step 1 — UE 5.8 modular C++ project scaffold`
 
+### Step 2 Checklist — Core Feel Prototype (C++) ✅
+- [x] `SpaceMentumPhysicsTypes.h`: added `FTrajectoryPoint`, `FMaceTelemetry`, and delegates.
+- [x] `Solvers/TrajectoryPredictor.h/.cpp`: analytical closed-form trajectory projection (`PredictTrajectoryCurve`), impulse solvers (`ComputeSteeringImpulse`, `ComputeSteeringDeltaVelocity`), mace kinematics.
+- [x] `Components/MaceOrbitComponent.h/.cpp`: enabled `TG_PrePhysics` tick, $\omega$/$\theta$ integration, angular acceleration/speed caps, counter-spin braking, `OnMaceOrbitReleased` broadcast, world/local mace head queries, telemetry bundling.
+- [x] `Components/MomentumTransferComponent.h/.cpp`: enabled `TG_PrePhysics` tick, impulse execution $J = \pm \alpha \cdot m_m \cdot v_t$, delta velocity $\Delta v = J / m_p$, lateral velocity clamping, exact exponential damping $e^{-\lambda t}$, `OnMomentumKickFired` broadcast, runtime kick model toggle (`ToggleKickModel`).
+- [x] `Components/ForwardDriftComponent.h/.cpp`: enabled `TG_PrePhysics` tick, velocity composition ($v_{\text{forward}} + v_{\text{lateral}}$), automatic zero-g flying configuration on `UCharacterMovementComponent`.
+- [x] `Player/SpacePlayerController.h/.cpp`: procedural Enhanced Input setup (`IA_SpinCounterClockwise`, `IA_SpinClockwise`, `IA_ToggleKickModel`, `IMC_SpaceDiving_Procedural`), SOCD Last-Input-Priority resolution with fallback.
+- [x] `Player/SpaceAstronautCharacter.h/.cpp`: composition root wiring `MaceOrbit` release to `MomentumTransfer` execution, `EquipMaceDefinition` runtime pipeline, dynamic camera FOV kick pulse, debug gizmo and HUD invocation.
+- [x] `Debug/SpaceMentumDebugVisualizer.h/.cpp`: 3D spatial orbit ring, dynamic speed-colored mace head, tether line, tangential velocity vector arrow, instantaneous kick direction preview arrow, projected corridor trajectory curve, on-screen HUD telemetry lines.
+
 ---
 
-## Roadmap (proposed, after Step 1)
+## Roadmap
 
-| Step | Goal |
-| :--- | :--- |
-| 2 | Core feel prototype in C++: orbit integration, release → kick, forward drift, A/D input created in code, chase camera |
-| 3 | Greybox map `L_Prototype_Greybox` + debug overlay + trajectory gizmo (first editor work) |
-| 4 | Obstacles & spawner, collision/CCD, fail state |
-| 5 | VFX (plasma trail, space dust), audio (spin-pitch Metasound), FOV shifter |
+| Step | Goal | Status |
+| :--- | :--- | :--- |
+| 1 | UE 5.8 modular C++ project scaffold | ✅ COMPLETE |
+| 2 | Core feel prototype in C++: orbit integration, release → kick, forward drift, A/D input, chase camera, telemetry | ✅ COMPLETE |
+| 3 | Greybox map `L_Prototype_Greybox` + in-editor validation + feel calibration | ⏳ Next |
+| 4 | Obstacles & spawner, collision/CCD, fail state | 📋 Planned |
+| 5 | VFX (plasma trail, space dust), audio (spin-pitch Metasound), dynamic FOV shifter | 📋 Planned |
 
 ---
 
@@ -117,4 +134,6 @@
 
 | Date | Session | Work done |
 | :--- | :--- | :--- |
-| 2026-10-11 | Step 1 kickoff | Decisions locked; root, Config, targets, Physics + Abilities + Core modules, Content layout, Docs, README written; committed. Not yet compiled (UE not installed). |
+| 2026-10-11 | Step 1 kickoff | Decisions locked; root, Config, targets, Physics + Abilities + Core modules, Content layout, Docs, README written; committed. |
+| 2026-10-12 | Step 2 Core Feel Prototype | Full C++ implementation: Orbit integration, MomentumTransfer whiplash impulse, ForwardDrift composition, Procedural Enhanced Input, SOCD resolution, DebugVisualizer with 3D gizmos & on-screen HUD telemetry. |
+
