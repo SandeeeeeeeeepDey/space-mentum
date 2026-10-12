@@ -246,9 +246,15 @@ SpaceMentum/
 ## 5. Next Decisions & Feedback Checklist
 
 - [x] **Perspective Choice:** Third-Person Perspective (TPP / Chase Cam) with dynamic FOV and spring arm damping.
-- [x] **Engine Selection:** **Unreal Engine 5 (5.4+)** with Chaos Physics Substepping, Enhanced Input, and Niagara.
-- [ ] **Input Paradigm:** Mouse sweep vs Twin-stick rotational flick vs Single-button rhythmic cadence?
-- [ ] **Mace Orbit Plane:** Fixed horizontal 2D plane (Left/Right dodging) vs Full 3D 360-degree cylindrical orbital plane (dodging in X and Y axes)?
+- [x] **Engine Selection:** **Unreal Engine 5.8** with Chaos Physics Substepping, Enhanced Input, and Niagara.
+  *Creator: "Unreal Engine 5.8, released in June 2026. is what i want to choose"*
+- [x] **Input Paradigm:** **Two buttons only.** Hold A = spin counter-clockwise, hold D = spin clockwise. Releasing = the mace stops = momentum kick.
+  *Creator: "for pc A and D looks good. only two buttons for now to spin the mace, moment of stopping is the moment of release. everything can be controles by this i think."*
+- [x] **Mace Orbit Plane:** **Full 3D 360° cylindrical orbit.** The mace orbits in the astronaut's local YZ plane, so the release angle steers in both X and Y.
+- [ ] **Target Platform:** PC vs Mobile is still open. Two abstract inputs keep both viable (A/D on PC, left/right thumb zones on mobile).
+  *Creator: "im still not sure which would make more sense for me, a mobile game or a pc game"*
+- [ ] **Kick Direction:** Reaction recoil (GDD §3.1.2, `J = -α·m·v_t`) vs carry-along yank. Decide by feel in the Step 2 prototype (`EMomentumKickModel`).
 - [ ] **First Prototype Milestone:** Greybox level in UE5 focusing solely on the C++ momentum transfer feel and Cinemachine-like SpringArm responsiveness.
+  *Step 1 (C++ project scaffold) is done. Progress is tracked in [PROGRESS.md](PROGRESS.md).*
 
 

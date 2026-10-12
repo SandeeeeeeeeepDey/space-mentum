@@ -1,0 +1,40 @@
+# ==============================================================================
+# SpaceMentum — Unreal Engine 5 ignore rules
+# Keep the repo lean: only source, config, docs, and authored Content are tracked.
+# ==============================================================================
+
+# --- Unreal generated / build output ---
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+Build/
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+
+# --- IDE / project files (regenerate via "Generate Visual Studio project files") ---
+.vs/
+.vscode/
+.idea/
+*.sln
+*.suo
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+*.code-workspace
+compile_commands.json
+
+# --- Compiled artifacts ---
+*.pdb
+*.dll
+*.exe
+*.lib
+*.obj
+*.o
+*.ipch
+
+# --- OS clutter ---
+Thumbs.db
+.DS_Store
+desktop.ini
