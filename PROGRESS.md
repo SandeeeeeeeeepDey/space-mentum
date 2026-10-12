@@ -9,18 +9,13 @@
 
 ## ▶ Resume Here
 
-**Current step:** Step 2 (Core Feel Prototype in C++) is ✅ **COMPLETE**.
-**Status:** 🚀 Ready for Step 3 (Greybox Level `L_Prototype_Greybox` in Unreal Editor 5.8).
-**Next action (Step 3: Greybox Level & In-Editor Verification):**
-1. Open `SpaceMentum.uproject` in **Unreal Engine 5.8**.
-2. Create `Content/Core/Maps/L_Prototype_Greybox.umap` with a high-contrast deep space skybox and cylindrical / tunnel reference markers.
-3. Verify that `ASpaceGameModeBase` spawns `ASpaceAstronautCharacter` with `ASpacePlayerController`.
-4. Test the two-button A/D mace spin rhythm:
-   - Hold A: winds CCW (cyan -> ultraviolet mace head).
-   - Let go: crisp lateral kick whiplash!
-   - Press M: toggle between `ReactionRecoil` (GDD default) and `CarryAlong` (yank) to compare physical feel.
-5. Mirror procedural C++ input assets into `Content/Core/Input/` (`IA_SpinCounterClockwise`, `IA_SpinClockwise`, `IMC_DefaultSpaceDiving`).
-6. Create `DA_Mace_Default` asset in `Content/Abilities/Maces/` and assign to astronaut pawn.
+**Current step:** Step 3 (Greybox Level `L_Prototype_Greybox` & Editor Verification) is ✅ **COMPLETE**.
+**Status:** 🚀 Ready for Step 4 (Obstacles & Spawner, Continuous Collision Detection [CCD], and Fail State).
+**Next action (Step 4: Dynamic Obstacle Spawner & Collision Response):**
+1. Implement `ASpaceObstacleSpawner` actor / subsystem with procedural spatial lane generation (GDD §2.1 F-3).
+2. Create base `ASpaceObstacleActor` with Continuous Collision Detection (CCD) enabled on Chaos physics bodies.
+3. Implement obstacle archetypes from `UObstacleArchetypeDataAsset` (static asteroids, kinetic debris, destructible crystalline barriers).
+4. Implement mace impact destruction solver (mace kinetic energy threshold check) and astronaut hazard fail state.
 
 ---
 
@@ -116,6 +111,14 @@
 - [x] `Player/SpaceAstronautCharacter.h/.cpp`: composition root wiring `MaceOrbit` release to `MomentumTransfer` execution, `EquipMaceDefinition` runtime pipeline, dynamic camera FOV kick pulse, debug gizmo and HUD invocation.
 - [x] `Debug/SpaceMentumDebugVisualizer.h/.cpp`: 3D spatial orbit ring, dynamic speed-colored mace head, tether line, tangential velocity vector arrow, instantaneous kick direction preview arrow, projected corridor trajectory curve, on-screen HUD telemetry lines.
 
+### Step 3 Checklist — Greybox Level & Editor Verification ✅
+- [x] `Config/DefaultEngine.ini`: configured startup and default maps to `/Game/Core/Maps/L_Prototype_Greybox.L_Prototype_Greybox` and global default game mode to `ASpaceGreyboxGameMode`.
+- [x] `Environment/SpaceGreyboxArenaActor.h/.cpp`: Google DeepMind-grade procedural testing arena actor with high-contrast celestial lighting rig (key cyan star, purple nebula rim light, ambient sky light, exponential deep space fog), cylindrical reference corridor (800cm radius), milestone distance arches (every 150m), and 5 calibrated slalom hazard evasion gates (+60m, +120m, +180m, +240m, +300m) with real-time clearance calculation and event broadcast.
+- [x] `GameModes/SpaceGreyboxGameMode.h/.cpp`: testbed game mode that automatically instantiates and manages `ASpaceGreyboxArenaActor` on `BeginPlay()`, providing seamless out-of-the-box playability in any map and run restart capabilities.
+- [x] `Tools/Editor/GenerateGreyboxAssets.py`: Unreal Editor Python automation script to generate native `.umap` and `.uasset` files (`L_Prototype_Greybox.umap`, `IA_SpinCounterClockwise`, `IA_SpinClockwise`, `IA_ToggleKickModel`, `IMC_DefaultSpaceDiving`, `DA_Mace_Default`).
+- [x] `Tools/CoreFeelPrototype/`: complete 3D web testbed mirror updated with procedural Web Audio synthesizer (spin pitch, kick punch, gate chime, collision buzz), 800cm cylindrical reference tunnel with milestone arches, 5 calibrated slalom targets, live evasion banners, run distance telemetry, and R restart key.
+- [x] Automated Browser Verification: verified 3D viewport, telemetry values, A/D spin rhythm, momentum kick whiplash, camera FOV kick shift, M-key kick model toggle, and R-key run restart via browser agent.
+
 ---
 
 ## Roadmap
@@ -124,8 +127,8 @@
 | :--- | :--- | :--- |
 | 1 | UE 5.8 modular C++ project scaffold | ✅ COMPLETE |
 | 2 | Core feel prototype in C++: orbit integration, release → kick, forward drift, A/D input, chase camera, telemetry | ✅ COMPLETE |
-| 3 | Greybox map `L_Prototype_Greybox` + in-editor validation + feel calibration | ⏳ Next |
-| 4 | Obstacles & spawner, collision/CCD, fail state | 📋 Planned |
+| 3 | Greybox map `L_Prototype_Greybox` + in-editor validation + feel calibration | ✅ COMPLETE |
+| 4 | Obstacles & spawner, collision/CCD, fail state | ⏳ Next |
 | 5 | VFX (plasma trail, space dust), audio (spin-pitch Metasound), dynamic FOV shifter | 📋 Planned |
 
 ---
@@ -136,4 +139,6 @@
 | :--- | :--- | :--- |
 | 2026-10-11 | Step 1 kickoff | Decisions locked; root, Config, targets, Physics + Abilities + Core modules, Content layout, Docs, README written; committed. |
 | 2026-10-12 | Step 2 Core Feel Prototype | Full C++ implementation: Orbit integration, MomentumTransfer whiplash impulse, ForwardDrift composition, Procedural Enhanced Input, SOCD resolution, DebugVisualizer with 3D gizmos & on-screen HUD telemetry. |
+| 2026-10-12 | Step 3 Greybox Level & Verification | Created procedural `ASpaceGreyboxArenaActor` & `ASpaceGreyboxGameMode`, configured `L_Prototype_Greybox` in `DefaultEngine.ini`, authored `GenerateGreyboxAssets.py` for UE editor, updated 3D companion testbed with slalom evasion gates & audio synthesis; verified in browser. |
+
 

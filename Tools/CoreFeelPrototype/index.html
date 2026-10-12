@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SpaceMentum — Core Feel Prototype (C++ Physics Mirror)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <!-- Three.js for 3D Viewport & Cinematic Chase Camera -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+  <!-- 3D Render Canvas -->
+  <div id="canvas-container"></div>
+
+  <!-- HUD Overlay -->
+  <div id="hud-overlay">
+    <!-- Top-Left Telemetry Box -->
+    <header class="hud-panel telemetry-panel">
+      <div class="panel-header">
+        <div class="brand">
+          <span class="brand-title">SPACEMENTUM</span>
+          <span class="badge">PHYSICS MIRROR</span>
+        </div>
+        <div class="status-indicator">
+          <span class="pulse-dot"></span>
+          <span>120Hz CHAOS SUBSTEPPING</span>
+        </div>
+      </div>
+
+      <div class="telemetry-grid">
+        <div class="metric-card">
+          <div class="metric-label">INPUT STATE</div>
+          <div id="stat-input" class="metric-value highlight-cyan">RELEASE ARMED</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">CADENCE</div>
+          <div id="stat-rpm" class="metric-value">0.0 RPM</div>
+          <div id="stat-deg-per-sec" class="metric-sub">0°/s</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">ORBIT ANGLE θ</div>
+          <div id="stat-angle" class="metric-value">0.0°</div>
+          <div id="stat-quadrant" class="metric-sub">RIGHT (+Y)</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">LATERAL DODGE (Y, Z)</div>
+          <div id="stat-lat-vel" class="metric-value">0.0 cm/s</div>
+          <div id="stat-lat-mag" class="metric-sub">Y: +0.0 | Z: +0.0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">FORWARD DRIFT (+X)</div>
+          <div id="stat-fwd-speed" class="metric-value">3000 cm/s</div>
+          <div class="metric-sub">108.0 km/h (SACRED)</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">KICK MODEL [PRESS M]</div>
+          <div id="stat-kick-model" class="metric-value highlight-gold">Reaction Recoil</div>
+          <div class="metric-sub">J = -α · m · v_t</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">GREYBOX TRACK & SLALOM</div>
+          <div id="stat-track-dist" class="metric-value highlight-cyan">0.0 m / 600 m</div>
+          <div id="stat-slalom-cleared" class="metric-sub">0 / 5 GATES CLEARED</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Greybox Slalom Evasion Notification Banner -->
+    <div id="slalom-banner" class="slalom-banner hidden">
+      <div class="slalom-icon" id="slalom-icon">✓</div>
+      <div class="slalom-text-group">
+        <div id="slalom-title" class="slalom-title">CLEAN EVASION!</div>
+        <div id="slalom-detail" class="slalom-detail">Gate 1 Cleared: +245 cm clearance</div>
+      </div>
+    </div>
+
+    <!-- Center Crosshair / Orbit Ring Guide -->
+    <div class="center-crosshair">
+      <div class="crosshair-ring"></div>
+      <div class="crosshair-dot"></div>
+    </div>
+
+    <!-- Bottom Controls & Key Prompts -->
+    <footer class="hud-panel controls-panel">
+      <div class="key-hints">
+        <div class="key-pill" id="key-a">
+          <kbd>A</kbd>
+          <span>SPIN COUNTER-CLOCKWISE</span>
+        </div>
+        <div class="key-pill release-pill" id="key-release">
+          <span class="pill-label">LET GO</span>
+          <span>MOMENTUM KICK</span>
+        </div>
+        <div class="key-pill" id="key-d">
+          <kbd>D</kbd>
+          <span>SPIN CLOCKWISE</span>
+        </div>
+        <div class="key-pill toggle-pill" id="key-m">
+          <kbd>M</kbd>
+          <span>TOGGLE KICK MODEL</span>
+        </div>
+        <div class="key-pill reset-pill" id="key-r">
+          <kbd>R</kbd>
+          <span>RESTART RUN</span>
+        </div>
+      </div>
+      <div class="feel-tip">
+        <span class="icon">⚡</span>
+        <span>Hold <strong>A</strong> or <strong>D</strong> to charge angular velocity. Let go at the apex of the swing to whip away from debris!</span>
+      </div>
+    </footer>
+
+    <!-- Side Tuning Drawer (Collapsible) -->
+    <aside class="tuning-drawer" id="tuning-drawer">
+      <button class="drawer-toggle" id="drawer-toggle" title="Toggle Live Physics Knobs">
+        <span>⚙ FEEL KNOBS</span>
+      </button>
+      <div class="drawer-content">
+        <h3>PHYSICS FEEL KNOBS</h3>
+        <p class="drawer-desc">Direct mirror of <code>FMaceOrbitTuning</code> & <code>FMomentumTransferTuning</code> in C++.</p>
+
+        <div class="slider-group">
+          <label>Tether Length (r): <span id="val-tether">160</span> cm</label>
+          <input type="range" id="slider-tether" min="80" max="300" value="160" step="5">
+        </div>
+
+        <div class="slider-group">
+          <label>Mace Mass (m_m): <span id="val-mace-mass">40</span> kg</label>
+          <input type="range" id="slider-mace-mass" min="5" max="120" value="40" step="1">
+        </div>
+
+        <div class="slider-group">
+          <label>Spin Acceleration: <span id="val-accel">1440</span> °/s²</label>
+          <input type="range" id="slider-accel" min="360" max="3600" value="1440" step="60">
+        </div>
+
+        <div class="slider-group">
+          <label>Max Angular Speed: <span id="val-max-speed">1080</span> °/s (3 rev/s)</label>
+          <input type="range" id="slider-max-speed" min="360" max="2160" value="1080" step="60">
+        </div>
+
+        <div class="slider-group">
+          <label>Impulse Efficiency (α): <span id="val-alpha">0.60</span></label>
+          <input type="range" id="slider-alpha" min="0.1" max="1.5" value="0.6" step="0.05">
+        </div>
+
+        <div class="slider-group">
+          <label>Lateral Damping (λ): <span id="val-damping">1.50</span> /s</label>
+          <input type="range" id="slider-damping" min="0.2" max="4.0" value="1.5" step="0.1">
+        </div>
+
+        <div class="button-row">
+          <button id="btn-reset-feel" class="btn-secondary">RESET DEFAULTS</button>
+          <button id="btn-toggle-gizmos" class="btn-primary">GIZMOS: ON</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
