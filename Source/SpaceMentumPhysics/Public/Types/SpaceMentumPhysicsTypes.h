@@ -228,3 +228,133 @@ struct SPACEMENTUMPHYSICS_API FMaceTelemetry
 	EMomentumKickModel KickModel = EMomentumKickModel::ReactionRecoil;
 };
 
+/**
+ * Underlying reason for a run termination condition.
+ * Rule 3 Failure States (GDD §2.0 & update.md):
+ *  - KineticImpact: ship body collided with obstacle at lethal speed.
+ *  - UnreachableVoidDrift: zero reachable obstacles within the 13s–40s lookahead window.
+ *  - ZeroVelocity: astronaut stalled relative to environment with no propulsion.
+ */
+UENUM(BlueprintType)
+enum class EDoomFailureReason : uint8
+{
+	None                 UMETA(DisplayName = "None (Safe)"),
+	KineticImpact        UMETA(DisplayName = "Kinetic Impact (Crash)"),
+	UnreachableVoidDrift UMETA(DisplayName = "Lost to the Void (Unreachable)"),
+	ZeroVelocity         UMETA(DisplayName = "Zero Velocity Stall"),
+};
+
+/**
+ * Real-time internal kinematics state of the two-body astronaut/mace system.
+ * Enforces Newton's third law in vacuum: m_s * r_s + m_m * r_m = 0 relative to system CoM.
+ *
+ * @creator_feel
+ * "Swinging the heavy appendage to the left, the ship's body is violently forced to the right.
+ *  The player uses this to dodge obstacles, but if they pull the appendage back to neutral,
+ *  their body snaps back to the CoM line. This creates a 'physics debt'."
+ */
+USTRUCT(BlueprintType)
+struct SPACEMENTUMPHYSICS_API FCenterOfMassDisplacementState
+{
+	GENERATED_BODY()
+
+	/** Relative displacement of astronaut body from system Center of Mass (cm). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Kinematics")
+	FVector AstronautDisplacement = FVector::ZeroVector;
+
+	/** Relative displacement of mace head from system Center of Mass (cm). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Kinematics")
+	FVector MaceHeadDisplacement = FVector::ZeroVector;
+
+	/** Counter-rotation angle of astronaut body about forward +X axis (radians). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Kinematics")
+	float CounterRotationAngleRad = 0.0f;
+
+	/** Counter-rotational angular velocity of astronaut body (rad/s). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Kinematics")
+	float CounterAngularVelocityRadPerSec = 0.0f;
+
+	/** World location of the system Center of Mass (cm). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Kinematics")
+	FVector SystemCoMPosition = FVector::ZeroVector;
+
+	/** World velocity of the system Center of Mass (cm/s). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Kinematics")
+	FVector SystemCoMVelocity = FVector::ZeroVector;
+};
+
+/**
+ * Result data from an external physical collision between the mace head and an obstacle.
+ * Rule 1 External Forces (update.md):
+ * "The ONLY way to permanently change the trajectory of the ship's Center of Mass is to
+ *  physically strike the appendage against an environmental obstacle."
+ */
+USTRUCT(BlueprintType)
+struct SPACEMENTUMPHYSICS_API FExternalStrikeImpulse
+{
+	GENERATED_BODY()
+
+	/** World location of the physical collision impact point. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Collision")
+	FVector HitLocation = FVector::ZeroVector;
+
+	/** Surface normal of the impacted obstacle at contact point. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Collision")
+	FVector HitNormal = FVector::UpVector;
+
+	/** Relative velocity of mace head relative to obstacle at moment of collision (cm/s). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Collision")
+	FVector RelativeStrikeVelocity = FVector::ZeroVector;
+
+	/** Transferred external collision impulse vector J_ext (kg * cm/s). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Collision")
+	FVector ImpartedImpulse = FVector::ZeroVector;
+
+	/** Permanent velocity change applied to the system Center of Mass: Delta v_CoM = J_ext / M_total (cm/s). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Collision")
+	FVector ResultingCoMDeltaV = FVector::ZeroVector;
+
+	/** Coefficient of restitution [0 = plastic, 1 = elastic]. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Collision")
+	float Restitution = 0.75f;
+
+	/** Whether the collision shattered a brittle / destructible obstacle. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Collision")
+	bool bShatteredObstacle = false;
+};
+
+/**
+ * Telemetry snapshot from the continuous background predictive Doom Detection check.
+ * Sweeps the 13.0s – 40.0s lookahead horizon to detect hopeless trajectories into empty space.
+ */
+USTRUCT(BlueprintType)
+struct SPACEMENTUMPHYSICS_API FDoomPredictionSnapshot
+{
+	GENERATED_BODY()
+
+	/** True if predictive lookahead determined run cannot recover and is doomed. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Doom")
+	bool bIsDoomImminent = false;
+
+	/** Underlying reason for doom (ZeroVelocity or UnreachableVoidDrift). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Doom")
+	EDoomFailureReason Reason = EDoomFailureReason::None;
+
+	/** Total lookahead horizon evaluated in seconds (e.g. 40.0s). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Doom")
+	float LookaheadHorizonSeconds = 40.0f;
+
+	/** Number of valid obstacles/anchors intersecting the mace's maximum reach envelope. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Doom")
+	int32 ReachableObstacleCount = 0;
+
+	/** Time offset (seconds) to the nearest reachable obstacle, or -1 if none. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Doom")
+	float NearestReachableTimeSeconds = -1.0f;
+
+	/** Estimated seconds before entering irrecoverable void. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Doom")
+	float EstimatedTimeToDoomSeconds = 0.0f;
+};
+
+

@@ -6,6 +6,7 @@
  */
 
 #include "Components/MaceOrbitComponent.h"
+#include "Solvers/CenterOfMassKinematicsSolver.h"
 #include "Solvers/TrajectoryPredictor.h"
 
 UMaceOrbitComponent::UMaceOrbitComponent()
@@ -18,6 +19,16 @@ UMaceOrbitComponent::UMaceOrbitComponent()
 void UMaceOrbitComponent::BeginPlay()
 {
 	Super::BeginPlay();
+
+	FCenterOfMassKinematicsSolver::EvaluateInternalKinematics(
+		OrbitState.OrbitAngleRad,
+		OrbitState.AngularVelocityRadPerSec,
+		OrbitTuning.TetherLengthCm,
+		OrbitTuning.MaceMassKg,
+		AstronautMassKg,
+		45.0f,
+		CoMDisplacementState
+	);
 }
 
 void UMaceOrbitComponent::TickComponent(
@@ -88,6 +99,17 @@ void UMaceOrbitComponent::TickComponent(
 			OrbitState.OrbitAngleRad += 2.0f * PI;
 		}
 	}
+
+	// Real-time two-body internal displacement and counter-rotation evaluation
+	FCenterOfMassKinematicsSolver::EvaluateInternalKinematics(
+		OrbitState.OrbitAngleRad,
+		OrbitState.AngularVelocityRadPerSec,
+		OrbitTuning.TetherLengthCm,
+		OrbitTuning.MaceMassKg,
+		AstronautMassKg,
+		45.0f,
+		CoMDisplacementState
+	);
 }
 
 void UMaceOrbitComponent::SetHeldSpinDirection(EMaceSpinDirection Direction)

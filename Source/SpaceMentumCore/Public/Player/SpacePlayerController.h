@@ -59,6 +59,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "SpaceMentum|Input")
 	TObjectPtr<UInputAction> ToggleKickModelAction;
 
+	/** Charge and release button for starting asteroid push-off (Spacebar). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "SpaceMentum|Input")
+	TObjectPtr<UInputAction> ChargeLaunchPushAction;
+
 	// --- Internal Action Handlers ---
 
 	void OnSpinCounterClockwiseStarted();
@@ -66,6 +70,8 @@ protected:
 	void OnSpinClockwiseStarted();
 	void OnSpinClockwiseCompleted();
 	void OnToggleKickModelTriggered();
+	void OnChargeLaunchPushStarted();
+	void OnChargeLaunchPushCompleted();
 
 	/** Resolves simultaneous button holds using Last-Input-Priority and updates the pawn. */
 	void EvaluateActiveSpin();

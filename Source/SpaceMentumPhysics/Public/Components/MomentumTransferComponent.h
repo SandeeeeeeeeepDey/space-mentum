@@ -36,6 +36,16 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
 	EMomentumKickModel, KickModel
 );
 
+/**
+ * Event broadcast when the mace head physically impacts an obstacle,
+ * transferring external collision momentum to the entire system Center of Mass.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FOnExternalStrikeLanded,
+	const FExternalStrikeImpulse&, StrikeImpulse,
+	AActor*, HitObstacle
+);
+
 UCLASS(ClassGroup = (SpaceMentum), meta = (BlueprintSpawnableComponent))
 class SPACEMENTUMPHYSICS_API UMomentumTransferComponent : public UActorComponent
 {
@@ -90,20 +100,54 @@ public:
 	UFUNCTION(BlueprintPure, Category = "SpaceMentum|Transfer")
 	EMomentumKickModel GetKickModel() const { return TransferTuning.KickModel; }
 
+	/**
+	 * Executes an external strike momentum transfer when the mace head hits an obstacle.
+	 * Shifts the system Center of Mass velocity vector permanently.
+	 *
+	 * @return True if a valid collision impulse was calculated and applied.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "SpaceMentum|Transfer")
+	bool ExecuteExternalStrike(
+		const FVector& MaceVelocityWorld,
+		const FVector& ObstacleVelocityWorld,
+		const FVector& HitLocationWorld,
+		const FVector& HitNormalWorld,
+		float MaceMassKg,
+		float ObstacleMassKg,
+		float Restitution,
+		bool bIsAnchored,
+		AActor* HitObstacle);
+
+	/** World velocity of the system Center of Mass (cm/s). */
+	UFUNCTION(BlueprintPure, Category = "SpaceMentum|Transfer")
+	FVector GetSystemCoMVelocity() const { return SystemCoMVelocity; }
+
+	/** Overrides the system Center of Mass velocity vector. */
+	UFUNCTION(BlueprintCallable, Category = "SpaceMentum|Transfer")
+	void SetSystemCoMVelocity(const FVector& NewCoMVelocity);
+
 	/** Resets lateral dodging velocity to zero. */
 	UFUNCTION(BlueprintCallable, Category = "SpaceMentum|Transfer")
 	void ResetLateralVelocity();
 
-	/** Fired on the exact frame a momentum kick is applied. */
+	/** Fired on the exact frame an internal momentum kick is applied. */
 	UPROPERTY(BlueprintAssignable, Category = "SpaceMentum|Transfer")
 	FOnMomentumKickFired OnMomentumKickFired;
+
+	/** Fired on the exact frame an external mace strike impacts an obstacle. */
+	UPROPERTY(BlueprintAssignable, Category = "SpaceMentum|Transfer")
+	FOnExternalStrikeLanded OnExternalStrikeLanded;
 
 protected:
 	/** Feel knobs for the kick. Overridden at runtime by the equipped mace definition. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Transfer")
 	FMomentumTransferTuning TransferTuning;
 
-	/** Lateral velocity produced by kicks, decaying via LateralDampingPerSec. Local YZ only. */
+	/** Lateral velocity produced by internal kicks, decaying via LateralDampingPerSec. Local YZ only. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "SpaceMentum|Transfer")
 	FVector LateralVelocity = FVector::ZeroVector;
+
+	/** Permanent system Center of Mass velocity in world space (cm/s). Shifted by external strikes. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "SpaceMentum|Transfer")
+	FVector SystemCoMVelocity = FVector::ZeroVector;
 };

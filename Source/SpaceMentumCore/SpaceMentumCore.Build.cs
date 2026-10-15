@@ -29,5 +29,10 @@ public class SpaceMentumCore : ModuleRules
 			"SpaceMentumPhysics",
 			"SpaceMentumAbilities",
 		});
+
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"Niagara",
+		});
 	}
 }

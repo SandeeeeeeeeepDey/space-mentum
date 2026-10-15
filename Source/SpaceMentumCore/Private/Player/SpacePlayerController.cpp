@@ -12,6 +12,7 @@
 #include "InputMappingContext.h"
 #include "InputAction.h"
 #include "Engine/LocalPlayer.h"
+#include "GameModes/SpaceGameState.h"
 
 ASpacePlayerController::ASpacePlayerController()
 {
@@ -39,12 +40,19 @@ void ASpacePlayerController::EnsureDefaultInputBindingsExist()
 		ToggleKickModelAction->ValueType = EInputActionValueType::Boolean;
 	}
 
-	// Build default mapping context (A = CCW, D = CW, M = Toggle Kick Model)
+	if (!ChargeLaunchPushAction)
+	{
+		ChargeLaunchPushAction = NewObject<UInputAction>(this, TEXT("IA_ChargeLaunchPush_Procedural"));
+		ChargeLaunchPushAction->ValueType = EInputActionValueType::Boolean;
+	}
+
+	// Build default mapping context (A = CCW, D = CW, Space = Push Charge, M = Toggle Kick Model)
 	if (!DefaultMappingContext)
 	{
 		DefaultMappingContext = NewObject<UInputMappingContext>(this, TEXT("IMC_SpaceDiving_Procedural"));
 		DefaultMappingContext->MapKey(SpinCounterClockwiseAction, EKeys::A);
 		DefaultMappingContext->MapKey(SpinClockwiseAction, EKeys::D);
+		DefaultMappingContext->MapKey(ChargeLaunchPushAction, EKeys::SpaceBar);
 		DefaultMappingContext->MapKey(ToggleKickModelAction, EKeys::M);
 	}
 }
@@ -94,6 +102,20 @@ void ASpacePlayerController::SetupInputComponent()
 			&ASpacePlayerController::OnSpinClockwiseCompleted
 		);
 
+		// Spacebar: Charge and release launch push against starting asteroid
+		EnhancedInputComponent->BindAction(
+			ChargeLaunchPushAction,
+			ETriggerEvent::Started,
+			this,
+			&ASpacePlayerController::OnChargeLaunchPushStarted
+		);
+		EnhancedInputComponent->BindAction(
+			ChargeLaunchPushAction,
+			ETriggerEvent::Completed,
+			this,
+			&ASpacePlayerController::OnChargeLaunchPushCompleted
+		);
+
 		// M key: Toggle kick model for feel calibration
 		EnhancedInputComponent->BindAction(
 			ToggleKickModelAction,
@@ -112,6 +134,17 @@ void ASpacePlayerController::OnPossess(APawn* InPawn)
 
 void ASpacePlayerController::OnSpinCounterClockwiseStarted()
 {
+	UWorld* World = GetWorld();
+	const ASpaceGameState* GameState = World ? World->GetGameState<ASpaceGameState>() : nullptr;
+	if (GameState && GameState->GetCurrentRunPhase() == ESpaceRunPhase::LaunchPushOff)
+	{
+		if (ASpaceAstronautCharacter* Astronaut = Cast<ASpaceAstronautCharacter>(GetPawn()))
+		{
+			Astronaut->AdjustLaunchAim(-4.0f);
+		}
+		return;
+	}
+
 	bIsCounterClockwisePressed = true;
 	LastCounterClockwisePressTime = FPlatformTime::Seconds();
 	EvaluateActiveSpin();
@@ -125,6 +158,17 @@ void ASpacePlayerController::OnSpinCounterClockwiseCompleted()
 
 void ASpacePlayerController::OnSpinClockwiseStarted()
 {
+	UWorld* World = GetWorld();
+	const ASpaceGameState* GameState = World ? World->GetGameState<ASpaceGameState>() : nullptr;
+	if (GameState && GameState->GetCurrentRunPhase() == ESpaceRunPhase::LaunchPushOff)
+	{
+		if (ASpaceAstronautCharacter* Astronaut = Cast<ASpaceAstronautCharacter>(GetPawn()))
+		{
+			Astronaut->AdjustLaunchAim(4.0f);
+		}
+		return;
+	}
+
 	bIsClockwisePressed = true;
 	LastClockwisePressTime = FPlatformTime::Seconds();
 	EvaluateActiveSpin();
@@ -134,6 +178,22 @@ void ASpacePlayerController::OnSpinClockwiseCompleted()
 {
 	bIsClockwisePressed = false;
 	EvaluateActiveSpin();
+}
+
+void ASpacePlayerController::OnChargeLaunchPushStarted()
+{
+	if (ASpaceAstronautCharacter* Astronaut = Cast<ASpaceAstronautCharacter>(GetPawn()))
+	{
+		Astronaut->StartChargingLaunchPush();
+	}
+}
+
+void ASpacePlayerController::OnChargeLaunchPushCompleted()
+{
+	if (ASpaceAstronautCharacter* Astronaut = Cast<ASpaceAstronautCharacter>(GetPawn()))
+	{
+		Astronaut->ReleaseLaunchPushAndFire();
+	}
 }
 
 void ASpacePlayerController::OnToggleKickModelTriggered()

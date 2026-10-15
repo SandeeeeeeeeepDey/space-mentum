@@ -95,6 +95,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "SpaceMentum|Mace")
 	FMaceTelemetry GetTelemetry() const;
 
+	/** Returns the real-time two-body Center of Mass displacement and counter-rotation state. */
+	UFUNCTION(BlueprintPure, Category = "SpaceMentum|Mace")
+	FCenterOfMassDisplacementState GetCoMDisplacementState() const { return CoMDisplacementState; }
+
+	/** Sets the astronaut body mass for 1:4 two-body displacement calculation. */
+	UFUNCTION(BlueprintCallable, Category = "SpaceMentum|Mace")
+	void SetAstronautMassKg(float InMassKg) { AstronautMassKg = FMath::Max(InMassKg, 1.0f); }
+
 	/** Fired on the exact frame the player releases the spin button. */
 	UPROPERTY(BlueprintAssignable, Category = "SpaceMentum|Mace")
 	FOnMaceOrbitReleased OnMaceOrbitReleased;
@@ -104,7 +112,15 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Mace")
 	FMaceOrbitTuning OrbitTuning;
 
+	/** Astronaut body mass (kg). Default 160 kg produces exact 1:4 mass ratio against 40 kg mace. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Mace", meta = (ClampMin = "1.0"))
+	float AstronautMassKg = 160.0f;
+
 	/** Live orbit state — recorded for replays and ghost runs. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "SpaceMentum|Mace")
 	FMaceOrbitState OrbitState;
+
+	/** Real-time Center of Mass displacement and counter-rotation state. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "SpaceMentum|Mace")
+	FCenterOfMassDisplacementState CoMDisplacementState;
 };

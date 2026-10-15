@@ -68,6 +68,26 @@ graph LR
   - Projected flight path curve through the forward corridor (cyan).
   - Live on-screen HUD telemetry lines displaying RPM, speed, angle, and active kick model.
 
+## 5.1 Dynamic Flight Camera Rig (`USpaceFlightCameraComponent`)
+
+- **Speed-Reactive FOV Dilation:** Smooth asymptotic expansion from base $80^\circ$ up to $105^\circ$ as forward velocity climbs to $3600\text{ cm/s}$ ($130\text{ km/h}$).
+- **Spring Arm Length Dilation:** Pulls camera back by up to $+120\text{ cm}$ at hyperspace velocities to maintain forward corridor visibility.
+- **Dynamic Dutch Roll Banking:** Automatically banks the camera ($\pm 4.5^\circ$) in response to lateral whiplash evasion kicks ($v_y, v_z$).
+- **Non-Linear Kinetic Screen Shake:** Power-law trauma model ($Shake = Trauma^2$) on obstacle impacts and asteroid launch thrust.
+
+## 5.2 Multi-System Niagara Particle Pipeline (`USpaceFlightVFXComponent`)
+
+- **`NS_MacePlasmaTrail`:** Speed-reactive ribbon emitter attached to the mace head; dynamic parameter `User.RibbonColor` shifts from electric cyan (`#00f5d4`) at low spin to supersonic magenta (`#f72585`) at 3.0 rev/s.
+- **`NS_HyperspaceDust`:** Directional velocity streaks aligned inversely with velocity vector $\vec{v}$; spawn rate dynamically scales with linear speed ($180 \to 650\text{ particles/s}$).
+- **`NS_KineticImpactBurst`:** High-energy directional spark/plasma burst spawned at obstacle contact point $\vec{x}_{\text{impact}}$ along collision normal $\vec{n}$.
+- **`NS_LaunchExhaustBurst`:** Directional pneumatic decompression jet fired against the starting asteroid anchor during launch departure.
+
+## 5.3 Procedural Audio & Metasounds (`USpaceProceduralFlightAudioComponent`)
+
+- **Continuous Pitch-Tracking Oscillator:** Maps angular velocity $\omega$ ($0 \to 18.85\text{ rad/s}$) to audio pitch ($85\text{ Hz} \to 640\text{ Hz}$).
+- **Rotational Energy Volume Scaling:** Modulates sound loudness with rotational kinetic energy ($E_{\text{rot}} = \frac{1}{2} I \omega^2$).
+- **Sub-Bass Launch Thump:** Resonant 45Hz sub-bass transient when the starting asteroid hydraulic ram releases.
+- **Cosmic Wind Drag:** Velocity-filtered noise simulation for micro-particle hull friction.
 
 ## 6. Coding Standard
 

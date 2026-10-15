@@ -6,6 +6,7 @@
  */
 
 #include "Components/MomentumTransferComponent.h"
+#include "Solvers/CenterOfMassKinematicsSolver.h"
 #include "Solvers/TrajectoryPredictor.h"
 
 UMomentumTransferComponent::UMomentumTransferComponent()
@@ -19,6 +20,7 @@ void UMomentumTransferComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	LateralVelocity = FVector::ZeroVector;
+	SystemCoMVelocity = FVector::ZeroVector;
 }
 
 void UMomentumTransferComponent::TickComponent(
@@ -124,3 +126,54 @@ void UMomentumTransferComponent::ResetLateralVelocity()
 {
 	LateralVelocity = FVector::ZeroVector;
 }
+
+bool UMomentumTransferComponent::ExecuteExternalStrike(
+	const FVector& MaceVelocityWorld,
+	const FVector& ObstacleVelocityWorld,
+	const FVector& HitLocationWorld,
+	const FVector& HitNormalWorld,
+	float MaceMassKg,
+	float ObstacleMassKg,
+	float Restitution,
+	bool bIsAnchored,
+	AActor* HitObstacle)
+{
+	const float SafeAstronautMassKg = FMath::Max(1.0f, TransferTuning.AstronautMassKg);
+	const float SafeMaceMassKg = FMath::Max(0.1f, MaceMassKg);
+	const float TotalSystemMassKg = SafeAstronautMassKg + SafeMaceMassKg;
+
+	FExternalStrikeImpulse StrikeImpulse;
+	const bool bValidImpact = FCenterOfMassKinematicsSolver::SolveExternalStrikeCollision(
+		MaceVelocityWorld,
+		ObstacleVelocityWorld,
+		HitLocationWorld,
+		HitNormalWorld,
+		TotalSystemMassKg,
+		ObstacleMassKg,
+		Restitution,
+		bIsAnchored,
+		StrikeImpulse
+	);
+
+	if (!bValidImpact)
+	{
+		return false;
+	}
+
+	// Permanently deflect the system Center of Mass velocity vector!
+	SystemCoMVelocity += StrikeImpulse.ResultingCoMDeltaV;
+
+	// Broadcast strike event for VFX (NS_KineticImpactBurst), camera punch, and audio
+	if (OnExternalStrikeLanded.IsBound())
+	{
+		OnExternalStrikeLanded.Broadcast(StrikeImpulse, HitObstacle);
+	}
+
+	return true;
+}
+
+void UMomentumTransferComponent::SetSystemCoMVelocity(const FVector& NewCoMVelocity)
+{
+	SystemCoMVelocity = NewCoMVelocity;
+}
+

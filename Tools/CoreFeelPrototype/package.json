@@ -1,0 +1,21 @@
+{
+  "name": "spacementum-core-feel-prototype",
+  "version": "0.7.0",
+  "description": "SpaceMentum — 3D Interactive Core Feel Prototype & Cockpit Flight Telemetry (Step 7 High-Fidelity Asset Pipeline & Polish)",
+  "main": "app.js",
+  "scripts": {
+    "start": "npx -y serve . -l 8080",
+    "test": "node -c app.js",
+    "package:web": "node package-dist.js"
+  },
+  "keywords": [
+    "spacementum",
+    "unreal-engine-5.8",
+    "deepmind-grade",
+    "newtonian-physics",
+    "metasound",
+    "threejs"
+  ],
+  "author": "SpaceMentum Team",
+  "license": "MIT"
+}

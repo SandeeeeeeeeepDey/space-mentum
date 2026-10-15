@@ -8,7 +8,8 @@ Binaries/
 Intermediate/
 Saved/
 DerivedDataCache/
-Build/
+/Build/
+!Tools/Build/
 Plugins/**/Binaries/
 Plugins/**/Intermediate/
 
