@@ -312,7 +312,11 @@
   // --- Game Flow / UI State (separate from State.RunPhase physics phases) ---
   const UI = {
     screen: 'playing', // 'title' | 'playing' | 'paused' | 'results'
+    sub: null, // open sub-screen over title/pause: 'howto' | 'settings' | 'sector'
     devOpen: false,
+    audioDucked: false,
+    menuIndex: 0,
+    title: { sector: 1, mode: 'Gauntlet' }, // selections made on the title screen
   };
 
   // --- Dynamic Slalom Gates (Populated by loadSector) ---
@@ -333,12 +337,25 @@
       if (AudioContextClass) {
         audioCtx = new AudioContextClass();
         setupContinuousSpinSynth();
+        applyAudioDuck();
       }
     }
     if (audioCtx && audioCtx.state === 'suspended') {
       audioCtx.resume();
     }
     return audioCtx;
+  }
+
+  // Pause / menus: silence the continuous loops (the sim that retargets them is frozen meanwhile)
+  function applyAudioDuck() {
+    if (!audioCtx || !continuousSpinGain || !continuousReactorHumGain) return;
+    const t = audioCtx.currentTime;
+    if (UI.audioDucked) {
+      continuousSpinGain.gain.setTargetAtTime(0.0001, t, 0.05);
+      continuousReactorHumGain.gain.setTargetAtTime(0.0001, t, 0.05);
+    } else {
+      continuousReactorHumGain.gain.setTargetAtTime(0.035 * Tuning.EngineHumVolume * Tuning.AudioMasterVolume, t, 0.1);
+    }
   }
 
   function setupContinuousSpinSynth() {
@@ -1054,6 +1071,7 @@
   }
 
   function restartRun() {
+    showScreen('playing');
     if (Tuning.ActiveScreenMode === 'ColossalBelt') {
       State.RunPhase = 'Running';
       State.CoMPosition.x = 0.0; State.CoMPosition.y = 0.0; State.CoMPosition.z = 0.0;
@@ -3183,20 +3201,25 @@
     lastTime = now;
     if (dt > 0.05) dt = 0.05;
 
-    // 120Hz Substepping
-    const substeps = 4;
-    const subDt = dt / substeps;
-    for (let s = 0; s < substeps; s++) {
-      physicsTick(subDt);
-    }
+    // Title / pause freeze the simulation but keep rendering
+    const simActive = UI.screen !== 'paused' && UI.screen !== 'title';
 
-    if (Tuning.ActiveScreenMode === 'ColossalBelt') {
-      updateColossalAsteroidBelt(dt);
-      updateKineticTargetingAndAim();
-    }
+    if (simActive) {
+      // 120Hz Substepping
+      const substeps = 4;
+      const subDt = dt / substeps;
+      for (let s = 0; s < substeps; s++) {
+        physicsTick(subDt);
+      }
 
-    updateHyperspaceSpeedDust(dt);
-    updateKineticSparks(dt);
+      if (Tuning.ActiveScreenMode === 'ColossalBelt') {
+        updateColossalAsteroidBelt(dt);
+        updateKineticTargetingAndAim();
+      }
+
+      updateHyperspaceSpeedDust(dt);
+      updateKineticSparks(dt);
+    }
     update3DVisuals();
     updateHUD();
     drawTacticalRadar();
@@ -4084,6 +4107,324 @@
     if (open) updateDevHUD();
   }
 
+  // --- Game Flow: screens, menus, pause, settings ---
+  // Creator: "make the game screen minimalistic with only the information needed.
+  //           the interface doesnt look vary playagle and game like right now."
+  // UI.screen is the run-flow state ('title' | 'playing' | 'paused' | 'results'); it is separate
+  // from State.RunPhase. Title/pause freeze the sim (see animate) but keep rendering.
+  const SETTINGS_KEY = 'SPACEMENTUM_SETTINGS_V1';
+  const SCREEN_IDS = { title: 'screen-title', paused: 'screen-pause' };
+  const SUB_IDS = { howto: 'screen-howto', settings: 'screen-settings', sector: 'sector-select-modal' };
+  const AUDIO_SETTINGS = [
+    // [menu slider, Tuning prop, menu label, dev-drawer slider, dev-drawer label]
+    ['set-master', 'AudioMasterVolume', 'set-master-val', 'slider-audio-volume', 'val-audio-volume'],
+    ['set-hum', 'EngineHumVolume', 'set-hum-val', 'slider-engine-hum', 'val-engine-hum'],
+    ['set-prox', 'ProximityAlarmVolume', 'set-prox-val', 'slider-prox-alarm-vol', 'val-prox-alarm-vol'],
+  ];
+
+  function showScreen(name) {
+    UI.screen = name;
+    closeSubScreen(true);
+    document.body.dataset.screen = name;
+    for (const key in SCREEN_IDS) {
+      const el = document.getElementById(SCREEN_IDS[key]);
+      if (el) el.classList.toggle('hidden', key !== name);
+    }
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    if (name === 'title' || name === 'paused') clearHeldInput();
+    UI.audioDucked = name === 'title' || name === 'paused';
+    applyAudioDuck();
+    if (name === 'title') refreshTitleMenu();
+    UI.menuIndex = 0;
+    selectMenuItem(0);
+  }
+
+  // Drop held keys + in-progress charges so releases during a menu never fire kicks/pushes
+  function clearHeldInput() {
+    Input.isAPressed = false;
+    Input.isDPressed = false;
+    Input.isSpacePressed = false;
+    State.HeldSpinDirection = 'None';
+    State.bIsChargingPush = false;
+    State.bIsChargingKineticPush = false;
+    State.LaunchPushCharge = 0.0;
+    State.KineticPushCharge = 0.0;
+    const btn = document.getElementById('btn-charge-push');
+    if (btn) btn.classList.remove('charging');
+  }
+
+  function pauseGame() {
+    if (UI.screen !== 'playing' || UI.sub) return;
+    if (State.RunPhase !== 'LaunchPushOff' && State.RunPhase !== 'Running') return;
+    showScreen('paused');
+  }
+
+  function resumeGame() {
+    if (UI.screen !== 'paused') return;
+    lastTime = performance.now();
+    showScreen('playing');
+  }
+
+  function quitToTitle() {
+    restartRun();
+    UI.title.sector = State.CurrentSectorIndex;
+    UI.title.mode = Tuning.ActiveScreenMode;
+    showScreen('title');
+  }
+
+  function startRunFromTitle() {
+    State.CurrentSectorIndex = UI.title.sector;
+    setScreenMode(UI.title.mode); // reloads the sector and restarts the run -> UI.screen = 'playing'
+  }
+
+  function refreshTitleMenu() {
+    const sector = SectorCatalog[UI.title.sector];
+    const isCorridor = UI.title.mode !== 'ColossalBelt';
+    const sectorEl = document.getElementById('title-sector-val');
+    const modeEl = document.getElementById('title-mode-val');
+    const bestEl = document.getElementById('title-best');
+    if (sectorEl && sector) sectorEl.textContent = sector.name.replace(/^Sector \d+:\s*/, '');
+    if (modeEl) modeEl.textContent = isCorridor ? 'CORRIDOR' : 'COLOSSAL BELT';
+    if (bestEl) {
+      const pb = SaveGame.getProfile().personalBests[UI.title.sector];
+      bestEl.textContent = isCorridor && pb ? `BEST ${pb.compositeScore.toLocaleString()}` : ' ';
+    }
+  }
+
+  function refreshSectorCards() {
+    document.querySelectorAll('.sector-choice-card').forEach(card => {
+      card.classList.toggle('active', parseInt(card.dataset.sector, 10) === UI.title.sector);
+    });
+  }
+
+  function openSubScreen(name) {
+    UI.returnIndex = UI.menuIndex;
+    UI.sub = name;
+    const el = document.getElementById(SUB_IDS[name]);
+    if (el) el.classList.remove('hidden');
+    if (name === 'settings') syncAudioUI();
+    if (name === 'sector') refreshSectorCards();
+    UI.menuIndex = 0;
+    selectMenuItem(0);
+  }
+
+  function closeSubScreen(silent) {
+    if (!UI.sub) return;
+    const el = document.getElementById(SUB_IDS[UI.sub]);
+    if (el) el.classList.add('hidden');
+    UI.sub = null;
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    if (!silent) selectMenuItem(UI.returnIndex || 0);
+  }
+
+  function getMenuRoot() {
+    if (UI.sub === 'howto') return document.getElementById('screen-howto');
+    if (UI.sub === 'settings') return document.getElementById('screen-settings');
+    if (UI.sub === 'sector') return null;
+    if (UI.screen === 'title') return document.getElementById('title-menu');
+    if (UI.screen === 'paused') return document.getElementById('pause-menu');
+    return null;
+  }
+
+  function getMenuItems(root) {
+    if (!root) return [];
+    return Array.from(root.querySelectorAll('.menu-item, input[type=range]')).filter(el => el.offsetParent !== null);
+  }
+
+  function selectMenuItem(index) {
+    const items = getMenuItems(getMenuRoot());
+    if (items.length === 0) return;
+    const i = ((index % items.length) + items.length) % items.length;
+    UI.menuIndex = i;
+    items.forEach((el, n) => el.classList.toggle('selected', n === i));
+    if (items[i].tagName === 'INPUT') items[i].focus();
+    else if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  }
+
+  function playMenuBlip(confirm) {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(confirm ? 880 : 620, now);
+    gain.gain.setValueAtTime(0.08 * Tuning.AudioMasterVolume, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.075);
+  }
+
+  function cycleTitleOption(action, dir) {
+    if (action === 'mode') {
+      UI.title.mode = UI.title.mode === 'ColossalBelt' ? 'Gauntlet' : 'ColossalBelt';
+    } else if (action === 'sector') {
+      UI.title.sector = ((UI.title.sector - 1 + dir + 3) % 3) + 1;
+    } else {
+      return false;
+    }
+    refreshTitleMenu();
+    return true;
+  }
+
+  function activateMenuAction(action) {
+    switch (action) {
+      case 'play': startRunFromTitle(); break;
+      case 'sector': openSubScreen('sector'); break;
+      case 'mode': cycleTitleOption('mode', 1); break;
+      case 'howto': openSubScreen('howto'); break;
+      case 'settings': openSubScreen('settings'); break;
+      case 'back': closeSubScreen(); break;
+      case 'resume': resumeGame(); break;
+      case 'restart': restartRun(); break;
+      case 'quit': quitToTitle(); break;
+    }
+  }
+
+  // Returns true when the key was consumed by the game-flow layer
+  function handleMenuKey(e, key) {
+    const screen = UI.screen;
+    const playing = screen === 'playing';
+
+    if (key === 'escape') {
+      e.preventDefault();
+      if (UI.sub) {
+        playMenuBlip(false);
+        closeSubScreen();
+      } else if (playing) {
+        pauseGame();
+      } else if (screen === 'paused') {
+        resumeGame();
+      }
+      return true;
+    }
+
+    if (!UI.sub && key === 'p' && (playing || screen === 'paused')) {
+      if (playing) pauseGame(); else resumeGame();
+      return true;
+    }
+
+    if (!UI.sub && key === 'r' && (playing || screen === 'paused' || screen === 'results')) {
+      restartRun();
+      return true;
+    }
+
+    if (playing && !UI.sub) return false;
+
+    // Sector selector (title screen): up/down picks, enter confirms
+    if (UI.sub === 'sector') {
+      if (key === 'arrowup' || key === 'arrowdown') {
+        e.preventDefault();
+        cycleTitleOption('sector', key === 'arrowup' ? -1 : 1);
+        refreshSectorCards();
+        playMenuBlip(false);
+      } else if (key === 'enter') {
+        e.preventDefault();
+        playMenuBlip(true);
+        closeSubScreen();
+      }
+      return true;
+    }
+
+    const items = getMenuItems(getMenuRoot());
+    if (key === 'arrowup' || key === 'arrowdown') {
+      e.preventDefault();
+      selectMenuItem(UI.menuIndex + (key === 'arrowup' ? -1 : 1));
+      playMenuBlip(false);
+    } else if (key === 'arrowleft' || key === 'arrowright') {
+      const item = items[UI.menuIndex];
+      if (item && item.dataset && screen === 'title' && !UI.sub) {
+        e.preventDefault();
+        if (cycleTitleOption(item.dataset.action, key === 'arrowleft' ? -1 : 1)) playMenuBlip(false);
+      }
+    } else if (key === 'enter') {
+      const item = items[UI.menuIndex];
+      if (item && item.tagName !== 'INPUT') {
+        e.preventDefault();
+        item.click();
+      }
+    }
+    return true;
+  }
+
+  // --- Audio settings (menu sliders mirror the dev-drawer sliders; persisted to localStorage) ---
+  function syncAudioUI() {
+    for (const [menuId, prop, menuValId, drawerId, drawerValId] of AUDIO_SETTINGS) {
+      const pct = Math.round(Tuning[prop] * 100);
+      for (const [id, valId] of [[menuId, menuValId], [drawerId, drawerValId]]) {
+        const slider = document.getElementById(id);
+        const label = document.getElementById(valId);
+        if (slider) slider.value = pct;
+        if (label) label.textContent = pct;
+      }
+    }
+  }
+
+  function saveSettings() {
+    try {
+      const data = {};
+      for (const [, prop] of AUDIO_SETTINGS) data[prop] = Tuning[prop];
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
+    } catch (e) {}
+  }
+
+  function loadSettings() {
+    try {
+      const data = JSON.parse(localStorage.getItem(SETTINGS_KEY));
+      if (data) {
+        for (const [, prop] of AUDIO_SETTINGS) {
+          const v = parseFloat(data[prop]);
+          if (isFinite(v)) Tuning[prop] = Math.max(0, Math.min(1, v));
+        }
+      }
+    } catch (e) {}
+    syncAudioUI();
+  }
+
+  function setupMenus() {
+    loadSettings();
+
+    for (const [menuId, prop] of AUDIO_SETTINGS) {
+      const slider = document.getElementById(menuId);
+      if (!slider) continue;
+      slider.addEventListener('input', () => {
+        Tuning[prop] = parseFloat(slider.value) / 100.0;
+        syncAudioUI();
+        saveSettings();
+      });
+    }
+    // Dev drawer edits (its own handlers already updated Tuning) keep the menu + storage in step
+    for (const [, , , drawerId] of AUDIO_SETTINGS) {
+      const slider = document.getElementById(drawerId);
+      if (slider) slider.addEventListener('input', () => { syncAudioUI(); saveSettings(); });
+    }
+    const resetBtn = document.getElementById('btn-reset-feel');
+    if (resetBtn) resetBtn.addEventListener('click', () => { syncAudioUI(); saveSettings(); });
+
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest ? e.target.closest('.menu-item[data-action]') : null;
+      if (!btn) return;
+      playMenuBlip(true);
+      btn.blur();
+      activateMenuAction(btn.dataset.action);
+    });
+
+    document.addEventListener('mouseover', (e) => {
+      const btn = e.target.closest ? e.target.closest('.menu-item') : null;
+      if (!btn) return;
+      const idx = getMenuItems(getMenuRoot()).indexOf(btn);
+      if (idx >= 0 && idx !== UI.menuIndex) selectMenuItem(idx);
+    });
+
+    // Auto-pause when the window loses focus / tab is hidden
+    window.addEventListener('blur', pauseGame);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) pauseGame();
+    });
+  }
+
   // --- Keyboard & Mouse Event Listeners ---
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
@@ -4094,6 +4435,9 @@
       setDevOverlay(!UI.devOpen);
       return;
     }
+
+    if (handleMenuKey(e, key)) return;
+    if (UI.screen !== 'playing') return;
 
     if (key === ' ' || e.code === 'Space') {
       e.preventDefault();
@@ -4121,8 +4465,6 @@
       evaluateActiveSpin();
     } else if (key === 'm') {
       if (UI.devOpen) toggleKickModel();
-    } else if (key === 'r') {
-      restartRun();
     }
   });
 
@@ -4130,8 +4472,9 @@
     const key = e.key.toLowerCase();
 
     if (key === ' ' || e.code === 'Space') {
-      e.preventDefault();
+      if (UI.screen === 'playing') e.preventDefault();
       Input.isSpacePressed = false;
+      if (UI.screen !== 'playing') return;
       if (Tuning.ActiveScreenMode === 'ColossalBelt') {
         releaseAndDeployKineticPush();
       } else if (State.RunPhase === 'LaunchPushOff') {
@@ -4139,17 +4482,18 @@
       }
     } else if (key === 'a') {
       Input.isAPressed = false;
-      evaluateActiveSpin();
+      if (UI.screen === 'playing') evaluateActiveSpin();
     } else if (key === 'd') {
       Input.isDPressed = false;
-      evaluateActiveSpin();
+      if (UI.screen === 'playing') evaluateActiveSpin();
     }
   });
 
   window.addEventListener('mousemove', onMouseMoveAim);
 
   window.addEventListener('mousedown', (e) => {
-    if (e.target.closest('#dev-overlay') || e.target.closest('#tuning-drawer') || e.target.closest('.hud-panel') || e.target.closest('.screen-switcher-tabs') || e.target.closest('.modal-backdrop') || e.target.closest('button')) {
+    if (UI.screen !== 'playing') return;
+    if (e.target.closest('#dev-overlay') || e.target.closest('.screen-overlay') || e.target.closest('.failure-modal') || e.target.closest('button')) {
       return;
     }
     if (Tuning.ActiveScreenMode === 'ColossalBelt') {
@@ -4364,7 +4708,8 @@
     const closeSectorBtn = document.getElementById('btn-close-sector-modal');
     if (closeSectorBtn && sectorModal) {
       closeSectorBtn.addEventListener('click', () => {
-        sectorModal.classList.add('hidden');
+        if (UI.sub === 'sector') closeSubScreen();
+        else sectorModal.classList.add('hidden');
       });
     }
 
@@ -4372,6 +4717,13 @@
     sectorCards.forEach(card => {
       card.addEventListener('click', () => {
         const idx = parseInt(card.dataset.sector, 10);
+        if (UI.screen === 'title') {
+          // On the title screen the selector only records the choice; PLAY starts the run
+          UI.title.sector = idx;
+          closeSubScreen();
+          refreshTitleMenu();
+          return;
+        }
         loadSector(idx);
         if (sectorModal) sectorModal.classList.add('hidden');
       });
@@ -4451,6 +4803,10 @@
   // Initialize
   init3D();
   setupTuningDrawer();
+  setupMenus();
   if (/[?&]dev=1/.test(window.location.search)) setDevOverlay(true);
+  UI.title.sector = State.CurrentSectorIndex;
+  UI.title.mode = Tuning.ActiveScreenMode;
+  showScreen('title');
   animate();
 })();

@@ -2240,3 +2240,201 @@ html, body {
   70% { opacity: 1; }
   100% { opacity: 0; }
 }
+
+/* --- Menus & Results ---
+   Creator request: "make the game screen minimalistic with only the information needed.
+   the interface doesnt look vary playagle and game like right now."
+   Title, pause, how-to-play and settings: one centred column over a dark scrim, big buttons,
+   selected item marked with a cyan bar. */
+.screen-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(5, 7, 13, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: auto;
+  animation: screenFadeIn 0.2s ease-out;
+}
+
+.screen-overlay.screen-sub { background: rgba(5, 7, 13, 0.98); }
+
+@keyframes screenFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.menu-column {
+  width: 100%;
+  max-width: 520px;
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  text-align: center;
+}
+
+.menu-column-wide { max-width: 620px; }
+
+.menu-logo {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: clamp(36px, 8vmin, 72px);
+  letter-spacing: 0.12em;
+  color: #fff;
+  text-shadow: 0 0 28px rgba(0, 240, 255, 0.55), 0 0 60px rgba(0, 240, 255, 0.25);
+}
+
+.menu-tagline {
+  font-size: 14px;
+  font-style: italic;
+  color: var(--text-muted);
+  margin-bottom: 18px;
+}
+
+.menu-heading {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: 26px;
+  letter-spacing: 0.14em;
+  color: #fff;
+  margin-bottom: 10px;
+}
+
+.menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.menu-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 14px 22px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.12em;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease-out, border-color 0.15s ease-out, transform 0.15s ease-out;
+}
+
+.menu-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--color-cyan);
+  box-shadow: 0 0 10px var(--color-cyan);
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+}
+
+.menu-item.selected,
+.menu-item:focus-visible {
+  outline: none;
+  background: rgba(0, 240, 255, 0.1);
+  border-color: rgba(0, 240, 255, 0.5);
+  transform: translateX(4px);
+}
+
+.menu-item.selected::before,
+.menu-item:focus-visible::before { opacity: 1; }
+
+.menu-item-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-cyan);
+  letter-spacing: 0.08em;
+}
+
+.menu-item-sub {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-gold);
+  letter-spacing: 0.1em;
+}
+
+.menu-item-key {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+}
+
+.menu-footer { margin-top: 14px; color: var(--text-dim); }
+
+.howto-section {
+  margin-top: 10px;
+  text-align: left;
+  color: var(--color-cyan);
+}
+
+.howto-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.howto-keys { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.howto-keys kbd {
+  display: inline-block;
+  min-width: 30px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-bottom-width: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.setting-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 4px;
+  text-align: left;
+}
+
+.setting-row input[type=range] { width: 100%; accent-color: var(--color-cyan); }
+
+@media (prefers-reduced-motion: reduce) {
+  .screen-overlay { animation: none; }
+  .menu-item, .menu-item::before { transition: none; }
+}
+
+/* Title screen hides the in-flight HUD; the live scene stays visible behind the scrim */
+body[data-screen="title"] #game-hud,
+body[data-screen="title"] #aim-crosshair-3d,
+body[data-screen="title"] #kinetic-target-reticle,
+body[data-screen="title"] .center-crosshair { display: none; }

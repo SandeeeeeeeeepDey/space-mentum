@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SpaceMentum — Core Feel Prototype (C++ Physics Mirror & Cockpit Flight Telemetry)</title>
+  <title>SpaceMentum</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -366,6 +366,77 @@
       </div>
     </div>
 
+    <!-- Game flow screens (Creator: "the interface doesnt look vary playagle and game like right now.") -->
+    <!-- Title -->
+    <div id="screen-title" class="screen-overlay hidden">
+      <div class="menu-column">
+        <h1 class="menu-logo">SPACEMENTUM</h1>
+        <p class="menu-tagline">You can't brake and you can't turn.</p>
+        <div id="title-menu" class="menu-list">
+          <button class="menu-item" data-action="play">PLAY<span id="title-best" class="menu-item-sub">&nbsp;</span></button>
+          <button class="menu-item" data-action="sector">SECTOR<span id="title-sector-val" class="menu-item-val">Perseus Shallows</span></button>
+          <button class="menu-item" data-action="mode">MODE<span id="title-mode-val" class="menu-item-val">CORRIDOR</span></button>
+          <button class="menu-item" data-action="howto">HOW TO PLAY</button>
+          <button class="menu-item" data-action="settings">SETTINGS</button>
+        </div>
+        <div class="menu-footer hud-label">&#8593; &#8595; select &middot; enter confirm</div>
+      </div>
+    </div>
+
+    <!-- Pause -->
+    <div id="screen-pause" class="screen-overlay hidden">
+      <div class="menu-column">
+        <h2 class="menu-heading">PAUSED</h2>
+        <div id="pause-menu" class="menu-list">
+          <button class="menu-item" data-action="resume">RESUME<span class="menu-item-key">ESC</span></button>
+          <button class="menu-item" data-action="restart">RESTART<span class="menu-item-key">R</span></button>
+          <button class="menu-item" data-action="settings">SETTINGS</button>
+          <button class="menu-item" data-action="quit">QUIT TO TITLE</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- How to Play -->
+    <div id="screen-howto" class="screen-overlay screen-sub hidden">
+      <div class="menu-column menu-column-wide">
+        <h2 class="menu-heading">HOW TO PLAY</h2>
+        <div class="howto-section hud-label">Corridor</div>
+        <div class="howto-row"><span class="howto-keys"><kbd>A</kbd><kbd>D</kbd></span><span>Spin the mace. Spinning is your only engine &mdash; and the only way to steer.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>SPACE</kbd></span><span>At launch, hold to charge your push-off and release to fly. Aim with A / D first.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>RELEASE</kbd></span><span>Let go of A / D to kick sideways. The mace strikes rocks and flings you the other way.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>&#9678;</kbd></span><span>Reach the jump portal. Clean gates and mace strikes score. Hit a rock and the run is over.</span></div>
+        <div class="howto-section hud-label">Colossal Belt</div>
+        <div class="howto-row"><span class="howto-keys"><kbd>MOUSE</kbd></span><span>Giant asteroids come at you from all sides. Move the cursor to aim at one.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>CLICK</kbd><kbd>F</kbd></span><span>Lock onto the asteroid under the cursor.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>SPACE</kbd></span><span>Hold to charge a push, release to blast it away. Inside 18 m a weak push fails and the asteroid pushes you instead.</span></div>
+        <div class="menu-list">
+          <button class="menu-item" data-action="back">BACK<span class="menu-item-key">ESC</span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div id="screen-settings" class="screen-overlay screen-sub hidden">
+      <div class="menu-column">
+        <h2 class="menu-heading">SETTINGS</h2>
+        <div class="setting-row">
+          <label class="hud-label" for="set-master">Master volume <span id="set-master-val">100</span>%</label>
+          <input type="range" id="set-master" min="0" max="100" value="100" step="5">
+        </div>
+        <div class="setting-row">
+          <label class="hud-label" for="set-hum">Engine hum <span id="set-hum-val">45</span>%</label>
+          <input type="range" id="set-hum" min="0" max="100" value="45" step="5">
+        </div>
+        <div class="setting-row">
+          <label class="hud-label" for="set-prox">Proximity alarm <span id="set-prox-val">75</span>%</label>
+          <input type="range" id="set-prox" min="0" max="100" value="75" step="5">
+        </div>
+        <div class="menu-list">
+          <button class="menu-item" data-action="back">BACK<span class="menu-item-key">ESC</span></button>
+        </div>
+      </div>
+    </div>
+
     <!-- Dramatic Rule 2 Win Modal: Sector Jump Portal Breached -->
     <div id="sector-completed-modal" class="failure-modal victory-modal hidden">
       <div class="modal-card victory-card">
@@ -493,9 +564,7 @@
     <!-- Sector Selection Modal -->
     <div id="sector-select-modal" class="failure-modal sector-select-modal hidden">
       <div class="modal-card sector-modal-card">
-        <div class="modal-glitch-badge">CELESTIAL GAUNTLETS</div>
-        <h1 class="modal-headline cyan-glow">CHOOSE FLIGHT SECTOR</h1>
-        <p class="modal-quote">Select navigational gauntlet corridor to test momentum intuition:</p>
+        <h2 class="menu-heading">SECTOR</h2>
         <div class="sector-card-list">
           <div class="sector-choice-card active" data-sector="1">
             <div class="sector-choice-badge">SECTOR 1</div>
@@ -516,7 +585,7 @@
             <div class="sector-choice-desc">Claustrophobic iron-nickel asteroid cluster. High APM evasion and magenta jump portal.</div>
           </div>
         </div>
-        <button id="btn-close-sector-modal" class="modal-restart-btn">RETURN TO COCKPIT</button>
+        <button id="btn-close-sector-modal" class="modal-restart-btn">BACK</button>
       </div>
     </div>
 
