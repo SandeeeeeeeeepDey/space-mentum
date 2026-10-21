@@ -257,6 +257,10 @@
     StrikeCount: 0,
     LastStrikeTime: 0,
 
+    // Replayable sim: gameplay clock (ms, advanced only by physicsTick) + seeded RNG for physics/spawns
+    SimTimeMs: 0,
+    RngSeed: 1,
+
     // Doom Lookahead Diagnosis
     DoomSnapshot: {
       bIsDoomImminent: false,
@@ -299,9 +303,27 @@
     isAPressed: false,
     isDPressed: false,
     isSpacePressed: false,
-    lastAPressTime: 0,
+    lastAPressTime: 0, // SOCD ordering: monotonically increasing press sequence numbers
     lastDPressTime: 0,
+    seq: 0,
   };
+
+  // --- Replayable Sim: silent re-runs of the real physics (crash analysis, §2 of PLAN_CrashEscapeHint) ---
+  // While Sim.silent is true nothing may touch audio, DOM or scene objects; end-of-run triggers
+  // only record Sim.outcome.
+  const Sim = { silent: false, outcome: null, saved: null, override: null };
+
+  const SIM_DT = 1 / 120;          // fixed physics step (real game and silent re-runs alike)
+  const HIST_SAMPLE_STEPS = 4;     // one history snapshot per 1/30 s
+  const HIST_WINDOW_MS = 6000;
+
+  // mulberry32 over State.RngSeed: used for everything that changes physics or spawns
+  function simRandom() {
+    let t = (State.RngSeed = (State.RngSeed + 0x6D2B79F5) >>> 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
 
   // --- Game Flow / UI State (separate from State.RunPhase physics phases) ---
   const UI = {
@@ -326,6 +348,7 @@
   let lastProximityPingTime = 0;
 
   function getAudioContext() {
+    if (Sim.silent) return null;
     if (!audioCtx) {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       if (AudioContextClass) {
@@ -389,7 +412,7 @@
   }
 
   function updateContinuousSpinAudio(angularSpeedRadPerSec) {
-    if (!audioCtx || !continuousSpinOsc || !continuousSpinGain) return;
+    if (Sim.silent || !audioCtx || !continuousSpinOsc || !continuousSpinGain) return;
     const revPerSec = Math.abs(angularSpeedRadPerSec) / (2 * Math.PI);
     if (revPerSec > 0.1 && State.RunPhase === 'Running') {
       const targetFreq = Math.min(650, 75 + revPerSec * 160);
@@ -402,7 +425,7 @@
   }
 
   function updateContinuousEngineHumAudio(forwardSpeedCmPerSec, lateralSpeedCmPerSec) {
-    if (!audioCtx || !continuousReactorHumOsc || !continuousReactorHumGain) return;
+    if (Sim.silent || !audioCtx || !continuousReactorHumOsc || !continuousReactorHumGain) return;
     if (State.RunPhase === 'Running') {
       const speedRatio = Math.min(1.5, Math.hypot(forwardSpeedCmPerSec, lateralSpeedCmPerSec) / 3000.0);
       const targetFreq = 50 + speedRatio * 25.0;
@@ -448,7 +471,7 @@
       State.ProximityAlarm.nearestPos = nearestPos || null;
 
       const pingInterval = 1.0 - (threatRatio * 0.92);
-      if (nowSeconds - lastProximityPingTime >= pingInterval) {
+      if (!Sim.silent && nowSeconds - lastProximityPingTime >= pingInterval) {
         lastProximityPingTime = nowSeconds;
         playProximityRadarPing(threatRatio);
       }
@@ -828,6 +851,29 @@
     });
   }
 
+  // --- Input events: the DOM handlers and the silent replays both go through here ---
+  function applyInputEvent(name) {
+    if (!Sim.silent && Hist.active) Hist.events.push({ t: State.SimTimeMs, type: 'input', name });
+    switch (name) {
+      case 'aDown': Input.isAPressed = true; Input.lastAPressTime = ++Input.seq; evaluateActiveSpin(); break;
+      case 'dDown': Input.isDPressed = true; Input.lastDPressTime = ++Input.seq; evaluateActiveSpin(); break;
+      case 'aUp': Input.isAPressed = false; evaluateActiveSpin(); break;
+      case 'dUp': Input.isDPressed = false; evaluateActiveSpin(); break;
+      case 'spaceDown':
+        Input.isSpacePressed = true;
+        if (State.RunPhase === 'LaunchPushOff') startChargingPush();
+        else if (State.RunPhase === 'Running') startPushCharge();
+        break;
+      case 'spaceUp':
+        Input.isSpacePressed = false;
+        if (State.RunPhase === 'LaunchPushOff') fireLaunchPush(); else releasePush();
+        break;
+      case 'launchDown': startChargingPush(); break;
+      case 'launchUp': fireLaunchPush(); break;
+      case 'clear': clearHeldInput(); break;
+    }
+  }
+
   // --- SOCD Input Handling ---
   function evaluateActiveSpin() {
     if (State.RunPhase !== 'Running') return;
@@ -885,11 +931,13 @@
     State.CoMPosition.z += normal.z * pushDist;
 
     State.StrikeCount++;
-    State.LastStrikeTime = performance.now();
+    State.LastStrikeTime = State.SimTimeMs;
 
-    playStrikeSound();
-    triggerStrikeFlash(obstacle, deltaV, u);
-    spawnKineticSparks(hitWorldPos, 35);
+    if (!Sim.silent) {
+      playStrikeSound();
+      triggerStrikeFlash(obstacle, deltaV, u);
+      spawnKineticSparks(hitWorldPos, 35);
+    }
 
     State.TargetFOV = Math.min(106.0, State.CurrentFOV + 14.0);
     State.CameraTrauma = Math.min(1.0, State.CameraTrauma + 0.45);
@@ -899,6 +947,7 @@
   const TOAST_MAX_VISIBLE = 3;
 
   function showToast(text, variant) {
+    if (Sim.silent) return;
     const layer = document.getElementById('toast-layer');
     if (!layer) return;
     while (layer.children.length >= TOAST_MAX_VISIBLE) layer.removeChild(layer.firstChild);
@@ -916,6 +965,7 @@
   }
 
   function triggerStrikeFlash() {
+    if (Sim.silent) return;
     showToast('STRIKE', 'gold');
 
     const container = document.getElementById('canvas-container');
@@ -929,6 +979,10 @@
   function triggerVoidDoom(snapshot) {
     if (State.RunPhase !== 'Running') return;
     State.RunPhase = 'LostToTheVoid';
+    if (Sim.silent) {
+      Sim.outcome = { type: 'void', simTimeMs: State.SimTimeMs, obstacle: null };
+      return;
+    }
 
     playVoidDoomSound();
 
@@ -939,6 +993,18 @@
   function triggerKineticCrash(obstacle, impactSpeed) {
     if (State.RunPhase !== 'Running') return;
     State.RunPhase = 'CrashedKineticImpact';
+    const crashPos = { x: State.CoMPosition.x, y: State.CoMPosition.y, z: State.CoMPosition.z };
+    if (Sim.silent) {
+      Sim.outcome = { type: 'crash', simTimeMs: State.SimTimeMs, obstacle: obstacle || null, pos: crashPos };
+      return;
+    }
+    Hist.crash = {
+      simTimeMs: State.SimTimeMs,
+      pos: crashPos,
+      obstacleUid: (obstacle && obstacle.uid) || null,
+      obstacleName: (obstacle && obstacle.name) || null,
+      speed: impactSpeed,
+    };
 
     playCrashSound();
     State.CameraTrauma = 1.0;
@@ -955,15 +1021,20 @@
   function startChargingPush() {
     if (State.RunPhase !== 'LaunchPushOff') return;
     State.bIsChargingPush = true;
-    const btn = document.getElementById('btn-charge-push');
+    const btn = Sim.silent ? null : document.getElementById('btn-charge-push');
     if (btn) btn.classList.add('charging');
   }
 
   function fireLaunchPush() {
     if (State.RunPhase !== 'LaunchPushOff' || !State.bIsChargingPush) return;
+    if (!Sim.silent) {
+      // Pre-launch state (aim + charge in hand) so the crash analysis can retry other launches
+      Hist.prelaunch = takeSnapshot();
+      Hist.prelaunch.launch = { aim: State.LaunchAimAngleDeg, charge: Math.max(0.18, State.LaunchPushCharge) };
+    }
     State.bIsChargingPush = false;
 
-    const btn = document.getElementById('btn-charge-push');
+    const btn = Sim.silent ? null : document.getElementById('btn-charge-push');
     if (btn) btn.classList.remove('charging');
 
     const finalCharge = Math.max(0.18, State.LaunchPushCharge);
@@ -980,14 +1051,22 @@
 
     State.RunPhase = 'Running';
 
+    // Punch camera FOV & trauma
+    State.TargetFOV = Math.min(106.0, 80.0 + finalCharge * 18.0);
+    State.CameraTrauma = finalCharge * 0.45;
+
+    if (Sim.silent) return;
+
     // Audio & Screen Effects
     playLaunchExplosionThump();
     triggerKickFlash();
     spawnKineticSparks(new THREE.Vector3(0, 0, 0), 45);
 
-    // Punch camera FOV & trauma
-    State.TargetFOV = Math.min(106.0, 80.0 + finalCharge * 18.0);
-    State.CameraTrauma = finalCharge * 0.45;
+    // History starts at launch: the whole flight is the analysis window
+    Hist.events.length = 0;
+    Hist.samples.length = 0;
+    Hist.launch = { simTimeMs: State.SimTimeMs, aim: State.LaunchAimAngleDeg, charge: finalCharge };
+    recordHistorySample();
 
     countHintRun();
     const banner = document.getElementById('launch-guidance-banner');
@@ -1001,6 +1080,14 @@
 
   function restartRun() {
     showScreen('playing');
+    State.RngSeed = (Math.random() * 4294967296) >>> 0;
+    State.SimTimeMs = 0.0;
+    State.LastStrikeTime = 0.0;
+    doomCheckAccumulator = 0;
+    colossalSpawnTimer = 0;
+    simAccumulator = 0;
+    Input.seq = 0; Input.lastAPressTime = 0; Input.lastDPressTime = 0;
+    resetHistory();
     if (Tuning.ActiveScreenMode === 'ColossalBelt') {
       State.RunPhase = 'Running';
       State.CoMPosition.x = 0.0; State.CoMPosition.y = 0.0; State.CoMPosition.z = 0.0;
@@ -1041,6 +1128,8 @@
         spawnIncomingColossalAsteroid(4500 + i * 2800);
       }
 
+      Hist.launch = { simTimeMs: 0, aim: 0, charge: 0 };
+      recordHistorySample();
       updateHUD();
       return;
     }
@@ -1119,11 +1208,229 @@
     updateHUD();
   }
 
+  // --- Replayable Sim: history ring buffer, snapshots, silent re-runs (PLAN_CrashEscapeHint §2) ---
+  const Hist = {
+    active: false,
+    samples: [],     // { t, snap, body, inputs } every 1/30 s of sim time, last HIST_WINDOW_MS
+    events: [],      // input events (replayable) + pushRelease markers, stamped with sim time
+    prelaunch: null, // snapshot just before the launch push fired (carries .launch {aim, charge})
+    launch: null,    // { simTimeMs, aim, charge }
+    crash: null,     // { simTimeMs, pos, obstacleUid, obstacleName, speed } of the run that just ended
+    sinceSample: 0,
+  };
+
+  function resetHistory() {
+    Hist.active = true;
+    Hist.samples.length = 0;
+    Hist.events.length = 0;
+    Hist.prelaunch = null;
+    Hist.launch = null;
+    Hist.crash = null;
+    Hist.sinceSample = 0;
+  }
+
+  // State fields physicsTick reads or writes (scalars); vectors and references are handled below
+  const SNAP_KEYS = [
+    'RunPhase', 'LaunchAimAngleDeg', 'LaunchPushCharge', 'bIsChargingPush',
+    'OrbitAngleRad', 'AngularVelocityRadPerSec', 'HeldSpinDirection', 'CounterRotationRad',
+    'StrikeCount', 'LastStrikeTime', 'SimTimeMs', 'RngSeed',
+    'ActiveFlightTimeSeconds', 'CleanGatesCleared', 'CleanEvasionStreak', 'GrazePenalties',
+    'PeakSpeedCmPerSec', 'SpeedSampleSum', 'SpeedSampleCount', 'CurrentCompositeScore',
+    'KineticPushCharge', 'bIsChargingKineticPush',
+    'CurrentFOV', 'TargetFOV', 'CameraTrauma',
+  ];
+
+  function findObstacleByUid(uid) {
+    if (!uid) return null;
+    for (const o of denseObstacles) if (o.uid === uid) return o;
+    for (const o of colossalIncomingAsteroids) if (o.uid === uid) return o;
+    return null;
+  }
+
+  // Collider-only stand-in for a Colossal rock (no geometry, no scene node)
+  function makeSimAsteroid(d) {
+    return {
+      uid: d.uid,
+      mesh: { position: new THREE.Vector3(d.px, d.py, d.pz), rotation: { x: 0, y: 0, z: 0 }, geometry: null, material: null },
+      radius: d.radius,
+      massKg: d.massKg,
+      velocity: new THREE.Vector3(d.vx, d.vy, d.vz),
+      rotSpeed: new THREE.Vector3(0, 0, 0),
+      name: d.name,
+      destroyed: d.destroyed,
+      rangeCm: 99999.0,
+      closingSpeedCms: 0.0,
+      ttiSeconds: 99.9,
+      bIsCritical: false,
+    };
+  }
+
+  // Deep copy of everything the sim steps read or write. Rocks are referenced by uid, never by identity.
+  function takeSnapshot() {
+    const s = { st: {} };
+    for (const k of SNAP_KEYS) s.st[k] = State[k];
+    s.com = { x: State.CoMPosition.x, y: State.CoMPosition.y, z: State.CoMPosition.z };
+    s.vel = { x: State.CoMVelocity.x, y: State.CoMVelocity.y, z: State.CoMVelocity.z };
+    s.disp = { y: State.InternalDisplacement.y, z: State.InternalDisplacement.z };
+    s.milestones = Object.assign({}, State.MilestonesPassed);
+    s.doom = Object.assign({}, State.DoomSnapshot);
+    s.prox = Object.assign({}, State.ProximityAlarm);
+    s.anchorUid = State.PushAnchor ? (State.PushAnchor.uid || null) : null;
+    s.pushBuffer = State.PushBuffer ? { until: State.PushBuffer.until, charge: State.PushBuffer.charge } : null;
+    s.maceSnap = State.MaceSnap ? { targetRad: State.MaceSnap.targetRad, remaining: State.MaceSnap.remaining } : null;
+    s.input = {
+      a: Input.isAPressed, d: Input.isDPressed, space: Input.isSpacePressed,
+      lastA: Input.lastAPressTime, lastD: Input.lastDPressTime, seq: Input.seq,
+    };
+    s.gates = SlalomTargets.map(t => (t.evaluated ? 1 : 0) | (t.cleared ? 2 : 0));
+    s.globals = { doomAcc: doomCheckAccumulator, spawnTimer: colossalSpawnTimer, seq: colossalAsteroidSeq };
+    s.ast = colossalIncomingAsteroids.map(a => ({
+      uid: a.uid, radius: a.radius, massKg: a.massKg, name: a.name, destroyed: a.destroyed,
+      px: a.mesh.position.x, py: a.mesh.position.y, pz: a.mesh.position.z,
+      vx: a.velocity.x, vy: a.velocity.y, vz: a.velocity.z,
+    }));
+    return s;
+  }
+
+  // keepAsteroids: leave colossalIncomingAsteroids alone (used when handing the live world back)
+  function restoreSnapshot(s, keepAsteroids) {
+    for (const k of SNAP_KEYS) State[k] = s.st[k];
+    State.CoMPosition.x = s.com.x; State.CoMPosition.y = s.com.y; State.CoMPosition.z = s.com.z;
+    State.CoMVelocity.x = s.vel.x; State.CoMVelocity.y = s.vel.y; State.CoMVelocity.z = s.vel.z;
+    State.InternalDisplacement.y = s.disp.y; State.InternalDisplacement.z = s.disp.z;
+    State.MilestonesPassed = Object.assign({}, s.milestones);
+    Object.assign(State.DoomSnapshot, s.doom);
+    Object.assign(State.ProximityAlarm, s.prox);
+    State.PushBuffer = s.pushBuffer ? { until: s.pushBuffer.until, charge: s.pushBuffer.charge } : null;
+    State.MaceSnap = s.maceSnap ? { targetRad: s.maceSnap.targetRad, remaining: s.maceSnap.remaining } : null;
+    Input.isAPressed = s.input.a; Input.isDPressed = s.input.d; Input.isSpacePressed = s.input.space;
+    Input.lastAPressTime = s.input.lastA; Input.lastDPressTime = s.input.lastD; Input.seq = s.input.seq;
+    for (let i = 0; i < SlalomTargets.length && i < s.gates.length; i++) {
+      SlalomTargets[i].evaluated = !!(s.gates[i] & 1);
+      SlalomTargets[i].cleared = !!(s.gates[i] & 2);
+    }
+    doomCheckAccumulator = s.globals.doomAcc;
+    colossalSpawnTimer = s.globals.spawnTimer;
+    colossalAsteroidSeq = s.globals.seq;
+    if (!keepAsteroids) colossalIncomingAsteroids = s.ast.map(makeSimAsteroid);
+    State.PushAnchor = findObstacleByUid(s.anchorUid);
+  }
+
+  function recordHistorySample() {
+    Hist.samples.push({
+      t: State.SimTimeMs,
+      snap: takeSnapshot(),
+      body: {
+        x: State.CoMPosition.x,
+        y: State.CoMPosition.y + State.InternalDisplacement.y,
+        z: State.CoMPosition.z + State.InternalDisplacement.z,
+      },
+      inputs: { spin: State.HeldSpinDirection, space: Input.isSpacePressed, charge: State.KineticPushCharge },
+    });
+    Hist.sinceSample = 0;
+    const cutoff = State.SimTimeMs - HIST_WINDOW_MS;
+    let drop = 0;
+    while (drop < Hist.samples.length - 1 && Hist.samples[drop].t < cutoff) drop++;
+    if (drop > 0) Hist.samples.splice(0, drop);
+    const t0 = Hist.samples[0].t;
+    let ev = 0;
+    while (ev < Hist.events.length && Hist.events[ev].t < t0) ev++;
+    if (ev > 0) Hist.events.splice(0, ev);
+  }
+
+  function histAfterStep() {
+    if (State.RunPhase !== 'Running') return;
+    if (++Hist.sinceSample >= HIST_SAMPLE_STEPS) recordHistorySample();
+  }
+
+  // Silent mode brackets: the live world (State, rocks, accumulators) is saved on entry and handed back on exit.
+  function enterSilent() {
+    if (Sim.silent) return;
+    Sim.saved = { snap: takeSnapshot(), realAsteroids: colossalIncomingAsteroids };
+    Sim.silent = true;
+    Sim.outcome = null;
+    Sim.override = null;
+  }
+
+  function exitSilent() {
+    if (!Sim.silent) return;
+    Sim.silent = false;
+    colossalIncomingAsteroids = Sim.saved.realAsteroids;
+    restoreSnapshot(Sim.saved.snap, true);
+    Sim.saved = null;
+    Sim.outcome = null;
+    Sim.override = null;
+  }
+
+  function withSilent(fn) {
+    enterSilent();
+    try {
+      return fn();
+    } finally {
+      exitSilent();
+    }
+  }
+
+  // Step the real sim from the current (restored) state to untilMs, replaying recorded input events
+  // (sorted by time) as they come due. After a Sim.override fires, recorded inputs stop and everything is released.
+  // onStep runs after each step; returning true ends the run.
+  function simAdvance(untilMs, events, onStep) {
+    let ei = 0;
+    let cut = false;
+    if (events) while (ei < events.length && events[ei].t < State.SimTimeMs) ei++;
+    while (State.SimTimeMs < untilMs && !Sim.outcome) {
+      if (events && !cut) {
+        while (ei < events.length && events[ei].t <= State.SimTimeMs) {
+          const ev = events[ei++];
+          if (ev.type === 'input') applyInputEvent(ev.name);
+        }
+      }
+      simStep(SIM_DT);
+      if (Sim.override && Sim.override.done && !cut) {
+        cut = true;
+        clearHeldInput();
+      }
+      if (onStep && onStep() === true) break;
+    }
+  }
+
+  // Dev overlay `REPLAY CHECK`: restore the history sample from ~3 s before the crash, replay the recorded
+  // inputs silently, and require the same crash at the same sim time (±1 tick) and place (±1 cm).
+  function runReplayCheck() {
+    const crash = Hist.crash;
+    if (!crash || Hist.samples.length === 0) {
+      console.warn('[REPLAY CHECK] nothing to check yet: crash into something first');
+      return null;
+    }
+    let sample = Hist.samples[0];
+    for (const s of Hist.samples) if (s.t <= crash.simTimeMs - 3000) sample = s;
+    const events = Hist.events.filter(e => e.type === 'input');
+    const out = withSilent(() => {
+      restoreSnapshot(sample.snap);
+      simAdvance(crash.simTimeMs + 500, events);
+      return Sim.outcome;
+    });
+    const tickMs = SIM_DT * 1000.0;
+    const dtMs = out ? Math.abs(out.simTimeMs - crash.simTimeMs) : Infinity;
+    const distCm = out && out.pos ? Math.hypot(out.pos.x - crash.pos.x, out.pos.y - crash.pos.y, out.pos.z - crash.pos.z) : Infinity;
+    const pass = !!out && out.type === 'crash' && dtMs <= tickMs + 1e-6 && distCm <= 1.0;
+    const result = {
+      pass, fromMs: sample.t, crashMs: crash.simTimeMs, outcome: out ? out.type : 'none',
+      dtMs, distCm, events: events.length, mode: Tuning.ActiveScreenMode,
+    };
+    console.log(`[REPLAY CHECK] ${pass ? 'PASS' : 'FAIL'}`, result);
+    Hist.lastCheck = result;
+    const el = document.getElementById('replay-check-result');
+    if (el) el.textContent = pass ? `PASS (${dtMs.toFixed(2)} ms, ${distCm.toFixed(3)} cm)` : `FAIL (${result.outcome}, ${dtMs.toFixed(2)} ms, ${distCm.toFixed(2)} cm)`;
+    return result;
+  }
+
   // --- Fixed 120Hz Physics Tick ---
   let doomCheckAccumulator = 0;
 
   function physicsTick(dt) {
     if (dt <= 0) return;
+    State.SimTimeMs += dt * 1000.0;
 
     // 0. Launch Push-Off Phase State Logic (§1.4)
     if (State.RunPhase === 'LaunchPushOff') {
@@ -1229,7 +1536,7 @@
         nearestObsPos = obs.position;
       }
     }
-    updateProximityRadarAlarm(minObsDistCm, performance.now() / 1000.0, nearestObsPos);
+    updateProximityRadarAlarm(minObsDistCm, State.SimTimeMs / 1000.0, nearestObsPos);
     updateContinuousEngineHumAudio(State.CoMVelocity.x, Math.hypot(State.CoMVelocity.y, State.CoMVelocity.z));
 
     // 8. Slalom Gate Evasions
@@ -1334,7 +1641,7 @@
       }
 
       // 2. Fatal Kinetic Crash check against fragile astronaut body
-      const timeSinceLastDeflection = (performance.now() - State.LastStrikeTime) / 1000.0;
+      const timeSinceLastDeflection = (State.SimTimeMs - State.LastStrikeTime) / 1000.0;
       if (!bDeflectedByAppendage && timeSinceLastDeflection > 0.12) {
         const distToBody = astronautWorldPos.distanceTo(obs.position);
         if (distToBody <= (obs.radius + astronautBodyRadius)) {
@@ -1417,6 +1724,10 @@
   function completeSectorRun() {
     if (State.RunPhase !== 'Running') return;
     State.RunPhase = 'Completed';
+    if (Sim.silent) {
+      Sim.outcome = { type: 'complete', simTimeMs: State.SimTimeMs, obstacle: null };
+      return;
+    }
 
     const currentSector = SectorCatalog[State.CurrentSectorIndex];
     const totalDistMeters = currentSector.corridorLengthCm * 0.01;
@@ -1546,6 +1857,7 @@
   }
 
   function triggerWarpJumpFlash(colorStr) {
+    if (Sim.silent) return;
     const container = document.getElementById('canvas-container');
     if (container) {
       container.style.filter = `brightness(2.2) drop-shadow(0 0 60px ${colorStr || '#00f0ff'})`;
@@ -2134,6 +2446,7 @@
   }
 
   function spawnKineticSparks(originPos, count) {
+    if (Sim.silent) return;
     let spawned = 0;
     for (const p of sparkParticles) {
       if (p.life <= 0) {
@@ -2261,47 +2574,56 @@
   let colossalAsteroidSeq = 1;
 
   function spawnIncomingColossalAsteroid(spawnForwardX) {
-    if (!colossalBeltGroup) return;
+    if (!Sim.silent && !colossalBeltGroup) return;
 
+    // Physics-affecting randomness comes from the seeded sim RNG (same draw order live and silent);
+    // cosmetic randomness (crag shape, spin, label number) stays on Math.random.
     // Radius between 450cm and 1800cm (9m to 36m diameter), scaled by tuning knob
-    const baseRadius = (450 + Math.random() * 1350) * Tuning.ColossalAsteroidScale;
-    const geo = new THREE.IcosahedronGeometry(baseRadius, 1);
+    const baseRadius = (450 + simRandom() * 1350) * Tuning.ColossalAsteroidScale;
+    const offsetTheta = simRandom() * Math.PI * 2;
+    const offsetR = 250 + simRandom() * 1800;
+    const speed = Tuning.IncomingAsteroidSpeedCmPerSec * (0.85 + simRandom() * 0.35);
+    // Polar angle theta from negative X axis (0 to 28 degrees)
+    const angleFromForward = (simRandom() * 28.0) * (Math.PI / 180.0);
+    const azim = simRandom() * Math.PI * 2;
 
-    // Perturb vertices for rugged craggy asteroid shape
-    const posAttr = geo.attributes.position;
-    for (let i = 0; i < posAttr.count; i++) {
-      const vx = posAttr.getX(i);
-      const vy = posAttr.getY(i);
-      const vz = posAttr.getZ(i);
-      const perturb = 1.0 + (Math.random() - 0.5) * 0.28;
-      posAttr.setXYZ(i, vx * perturb, vy * perturb, vz * perturb);
+    let mesh;
+    if (Sim.silent) {
+      // Silent re-runs only need the collider: position/rotation stand-ins, no geometry or scene node
+      mesh = { position: new THREE.Vector3(), rotation: { x: 0, y: 0, z: 0 }, geometry: null, material: null };
+    } else {
+      const geo = new THREE.IcosahedronGeometry(baseRadius, 1);
+
+      // Perturb vertices for rugged craggy asteroid shape
+      const posAttr = geo.attributes.position;
+      for (let i = 0; i < posAttr.count; i++) {
+        const vx = posAttr.getX(i);
+        const vy = posAttr.getY(i);
+        const vz = posAttr.getZ(i);
+        const perturb = 1.0 + (Math.random() - 0.5) * 0.28;
+        posAttr.setXYZ(i, vx * perturb, vy * perturb, vz * perturb);
+      }
+      geo.computeVertexNormals();
+
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x334155,
+        roughness: 0.85,
+        metalness: 0.25,
+        flatShading: true,
+      });
+
+      mesh = new THREE.Mesh(geo, mat);
+      mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      colossalBeltGroup.add(mesh);
     }
-    geo.computeVertexNormals();
-
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x334155,
-      roughness: 0.85,
-      metalness: 0.25,
-      flatShading: true,
-    });
-
-    const mesh = new THREE.Mesh(geo, mat);
 
     // Position: forward at spawnForwardX, radial offset in Y, Z
-    const offsetTheta = Math.random() * Math.PI * 2;
-    const offsetR = 250 + Math.random() * 1800;
     const spawnY = State.CoMPosition.y + Math.cos(offsetTheta) * offsetR;
     const spawnZ = State.CoMPosition.z + Math.sin(offsetTheta) * offsetR;
     mesh.position.set(spawnForwardX, spawnY, spawnZ);
-    mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-    colossalBeltGroup.add(mesh);
 
     // Velocity: MUST have at least one component from the forward (vx < 0)
     // and can approach from ANY radial angle
-    const speed = Tuning.IncomingAsteroidSpeedCmPerSec * (0.85 + Math.random() * 0.35);
-    // Polar angle theta from negative X axis (0 to 28 degrees)
-    const angleFromForward = (Math.random() * 28.0) * (Math.PI / 180.0);
-    const azim = Math.random() * Math.PI * 2;
 
     const vx = -speed * Math.cos(angleFromForward);
     const vy = speed * Math.sin(angleFromForward) * Math.cos(azim);
@@ -2312,10 +2634,12 @@
     const volumeM3 = (4.0 / 3.0) * Math.PI * Math.pow(radiusMeters, 3);
     const massKg = Math.round(volumeM3 * 2600.0);
 
+    const uid = 'c' + colossalAsteroidSeq;
     const nameLetter = ColossalGreekLetters[(colossalAsteroidSeq++) % ColossalGreekLetters.length];
     const designation = `ASTEROID [${nameLetter}-${Math.floor(10 + Math.random() * 90)}]`;
 
     colossalIncomingAsteroids.push({
+      uid: uid,
       mesh: mesh,
       radius: baseRadius,
       massKg: massKg,
@@ -2420,10 +2744,12 @@
     );
 
     // 1. Rotate background outer belt monoliths
-    for (const bg of colossalBackgroundAsteroids) {
-      bg.mesh.rotation.x += bg.rotSpeed.x * dt;
-      bg.mesh.rotation.y += bg.rotSpeed.y * dt;
-      bg.mesh.rotation.z += bg.rotSpeed.z * dt;
+    if (!Sim.silent) {
+      for (const bg of colossalBackgroundAsteroids) {
+        bg.mesh.rotation.x += bg.rotSpeed.x * dt;
+        bg.mesh.rotation.y += bg.rotSpeed.y * dt;
+        bg.mesh.rotation.z += bg.rotSpeed.z * dt;
+      }
     }
 
     // 2. Advance oncoming asteroids
@@ -2458,7 +2784,7 @@
                         + (State.CoMVelocity.z - ast.velocity.z) * n.z);
 
         if (closing > Tuning.ColossalCrashSpeedCmPerSec) {
-          triggerKineticCrash({ name: ast.name, isAsteroid: true }, relSpeed);
+          triggerKineticCrash({ name: ast.name, isAsteroid: true, uid: ast.uid }, relSpeed);
           return;
         }
 
@@ -2472,18 +2798,22 @@
           State.CoMPosition.y += n.y * sep;
           State.CoMPosition.z += n.z * sep;
 
-          playAsteroidOverpoweredSound();
-          triggerAsteroidOverpowerFlash();
+          if (!Sim.silent) {
+            playAsteroidOverpoweredSound();
+            triggerAsteroidOverpowerFlash();
+            spawnKineticSparks(playerPos, 40);
+          }
           State.CameraTrauma = 1.0;
-          spawnKineticSparks(playerPos, 40);
         }
       }
 
       // Despawn if far behind player or deflected far out
       if (ast.mesh.position.x < State.CoMPosition.x - 6000 || ast.mesh.position.length() > 90000) {
-        colossalBeltGroup.remove(ast.mesh);
-        if (ast.mesh.geometry) ast.mesh.geometry.dispose();
-        if (ast.mesh.material) ast.mesh.material.dispose();
+        if (!Sim.silent) {
+          colossalBeltGroup.remove(ast.mesh);
+          if (ast.mesh.geometry) ast.mesh.geometry.dispose();
+          if (ast.mesh.material) ast.mesh.material.dispose();
+        }
         colossalIncomingAsteroids.splice(i, 1);
       }
     }
@@ -2492,11 +2822,11 @@
     colossalSpawnTimer += dt;
     if (colossalIncomingAsteroids.length < 5 && colossalSpawnTimer >= 1.8) {
       colossalSpawnTimer = 0;
-      spawnIncomingColossalAsteroid(State.CoMPosition.x + 16000 + Math.random() * 4000);
+      spawnIncomingColossalAsteroid(State.CoMPosition.x + 16000 + simRandom() * 4000);
     }
 
     // 3. Update expanding kinetic shockwave ring
-    if (kineticShockwaveMesh && kineticShockwaveMesh.visible) {
+    if (!Sim.silent && kineticShockwaveMesh && kineticShockwaveMesh.visible) {
       kineticShockwaveMesh.scale.addScalar(dt * 35.0);
       kineticShockwaveMesh.material.opacity -= dt * 2.8;
       if (kineticShockwaveMesh.material.opacity <= 0.0) {
@@ -2553,7 +2883,7 @@
   }
 
   function setPushAnchorHighlight(obs, bOn, charge, bDanger) {
-    if (!obs || !obs.mesh || !obs.mesh.material || !obs.mesh.material.emissive) return;
+    if (Sim.silent || !obs || !obs.mesh || !obs.mesh.material || !obs.mesh.material.emissive) return;
     const mat = obs.mesh.material;
     if (bOn) {
       if (!obs.pushRimSaved) {
@@ -2598,17 +2928,17 @@
     if (anchor) {
       executePushOff(anchor, charge);
     } else {
-      State.PushBuffer = { until: performance.now() + Tuning.PushReleaseBufferMs, charge: charge };
+      State.PushBuffer = { until: State.SimTimeMs + Tuning.PushReleaseBufferMs, charge: charge };
     }
   }
 
   function updatePushOff(dt) {
     // First-runs teaching cue: the first time any rock enters reach in a run
-    if (!State.PushCueShown && HUD.hintRuns <= HINT_MAX_RUNS) {
+    if (!Sim.silent && !State.PushCueShown && HUD.hintRuns <= HINT_MAX_RUNS) {
       const first = findPushAnchor();
       if (first) {
         State.PushCueShown = true;
-        State.PushCue = { obs: first, until: performance.now() + 1000 };
+        State.PushCue = { obs: first, until: State.SimTimeMs + 1000 };
       }
     }
 
@@ -2619,7 +2949,7 @@
         const charge = State.PushBuffer.charge;
         State.PushBuffer = null;
         executePushOff(anchor, charge);
-      } else if (performance.now() > State.PushBuffer.until) {
+      } else if (State.SimTimeMs > State.PushBuffer.until) {
         State.PushBuffer = null;
         playPushWhiffSound();
       }
@@ -2652,6 +2982,16 @@
   }
 
   function executePushOff(anchor, charge) {
+    // Crash analysis: "what if that push had been different?" swaps or drops the real push at its moment
+    const ov = Sim.override;
+    if (ov && !ov.done && State.SimTimeMs >= ov.atMs) {
+      ov.done = true;
+      if (ov.charge === null) return;
+      charge = ov.charge;
+    }
+    if (!Sim.silent && Hist.active) {
+      Hist.events.push({ t: State.SimTimeMs, type: 'pushRelease', charge: charge, anchorUid: anchor.uid || null });
+    }
     const body = getPushBodyPos();
     const center = getPushObstacleCenter(anchor);
     const n = new THREE.Vector3().subVectors(body, center);
@@ -2680,7 +3020,7 @@
       State.MaceSnap = { targetRad: Math.atan2(latZ, latY), remaining: 0.1 };
     }
 
-    if (anchor.massKg && kineticShockwaveMesh) {
+    if (!Sim.silent && anchor.massKg && kineticShockwaveMesh) {
       kineticShockwaveMesh.position.copy(contact);
       kineticShockwaveMesh.lookAt(body);
       kineticShockwaveMesh.scale.set(1, 1, 1);
@@ -2720,6 +3060,7 @@
   }
 
   function triggerAsteroidOverpowerFlash() {
+    if (Sim.silent) return;
     showToast('OVERPOWERED!', 'rose');
     const container = document.getElementById('canvas-container');
     if (container) {
@@ -2972,6 +3313,7 @@
         scene.add(mesh);
 
         denseObstacles.push({
+          uid: 'd' + denseObstacles.length,
           position: new THREE.Vector3(posX, posY, posZ),
           radius: radius,
           mesh: mesh,
@@ -3055,6 +3397,7 @@
   }
 
   function triggerKickFlash() {
+    if (Sim.silent) return;
     const container = document.getElementById('canvas-container');
     container.style.filter = 'brightness(1.4) drop-shadow(0 0 24px rgba(0,240,255,0.7))';
     setTimeout(() => { container.style.filter = 'none'; }, 130);
@@ -3062,6 +3405,14 @@
 
   // --- Render Loop ---
   let lastTime = performance.now();
+  let simAccumulator = 0;
+
+  // One fixed 120 Hz sim step: the same unit the silent crash re-runs use
+  function simStep(dt) {
+    physicsTick(dt);
+    if (Tuning.ActiveScreenMode === 'ColossalBelt') updateColossalAsteroidBelt(dt);
+    if (!Sim.silent && Hist.active) histAfterStep();
+  }
 
   function animate() {
     requestAnimationFrame(animate);
@@ -3075,15 +3426,11 @@
     const simActive = UI.screen !== 'paused' && UI.screen !== 'title';
 
     if (simActive) {
-      // 120Hz Substepping
-      const substeps = 4;
-      const subDt = dt / substeps;
-      for (let s = 0; s < substeps; s++) {
-        physicsTick(subDt);
-      }
-
-      if (Tuning.ActiveScreenMode === 'ColossalBelt') {
-        updateColossalAsteroidBelt(dt);
+      // Fixed-step accumulator at 120 Hz (replayable: every step has the same dt)
+      simAccumulator += dt;
+      while (simAccumulator >= SIM_DT) {
+        simStep(SIM_DT);
+        simAccumulator -= SIM_DT;
       }
 
       updateHyperspaceSpeedDust(dt);
@@ -3603,7 +3950,7 @@
       if (!el.classList.contains('hidden')) el.classList.add('hidden');
       return;
     }
-    const remainingMs = cue.until - performance.now();
+    const remainingMs = cue.until - State.SimTimeMs;
     if (remainingMs <= 0 || cue.obs.destroyed) {
       State.PushCue = null;
       el.classList.add('hidden');
@@ -4058,6 +4405,7 @@
 
   // Drop held keys + in-progress charges so releases during a menu never fire kicks/pushes
   function clearHeldInput() {
+    if (!Sim.silent && Hist.active) Hist.events.push({ t: State.SimTimeMs, type: 'input', name: 'clear' });
     Input.isAPressed = false;
     Input.isDPressed = false;
     Input.isSpacePressed = false;
@@ -4067,7 +4415,7 @@
     State.LaunchPushCharge = 0.0;
     State.KineticPushCharge = 0.0;
     clearPushState();
-    const btn = document.getElementById('btn-charge-push');
+    const btn = Sim.silent ? null : document.getElementById('btn-charge-push');
     if (btn) btn.classList.remove('charging');
   }
 
@@ -4363,20 +4711,11 @@
 
     if (key === ' ' || e.code === 'Space') {
       e.preventDefault();
-      Input.isSpacePressed = true;
-      if (State.RunPhase === 'LaunchPushOff') {
-        startChargingPush();
-      } else if (State.RunPhase === 'Running' && !e.repeat) {
-        startPushCharge();
-      }
+      applyInputEvent('spaceDown');
     } else if (key === 'a') {
-      Input.isAPressed = true;
-      Input.lastAPressTime = performance.now();
-      evaluateActiveSpin();
+      applyInputEvent('aDown');
     } else if (key === 'd') {
-      Input.isDPressed = true;
-      Input.lastDPressTime = performance.now();
-      evaluateActiveSpin();
+      applyInputEvent('dDown');
     }
   });
 
@@ -4385,19 +4724,12 @@
 
     if (key === ' ' || e.code === 'Space') {
       if (UI.screen === 'playing') e.preventDefault();
-      Input.isSpacePressed = false;
-      if (UI.screen !== 'playing') return;
-      if (State.RunPhase === 'LaunchPushOff') {
-        fireLaunchPush();
-      } else {
-        releasePush();
-      }
+      if (UI.screen !== 'playing') { Input.isSpacePressed = false; return; }
+      applyInputEvent('spaceUp');
     } else if (key === 'a') {
-      Input.isAPressed = false;
-      if (UI.screen === 'playing') evaluateActiveSpin();
+      if (UI.screen === 'playing') applyInputEvent('aUp'); else Input.isAPressed = false;
     } else if (key === 'd') {
-      Input.isDPressed = false;
-      if (UI.screen === 'playing') evaluateActiveSpin();
+      if (UI.screen === 'playing') applyInputEvent('dUp'); else Input.isDPressed = false;
     }
   });
 
@@ -4641,18 +4973,31 @@
     if (chargeBtn) {
       chargeBtn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
-        startChargingPush();
+        applyInputEvent('launchDown');
       });
       window.addEventListener('pointerup', () => {
         if (State.bIsChargingPush) {
-          fireLaunchPush();
+          applyInputEvent('launchUp');
         }
       });
     }
   }
 
+  // Dev overlay: REPLAY CHECK
+  function setupReplayCheck() {
+    const btn = document.getElementById('btn-replay-check');
+    if (btn) btn.addEventListener('click', () => { runReplayCheck(); btn.blur(); });
+    // Console / test-harness access (?dev=1 only)
+    if (/[?&]dev=1/.test(window.location.search)) {
+      window.__sm = { State, Input, Sim, Hist, Tuning, applyInputEvent, runReplayCheck, restartRun, setScreenMode,
+        loadSector, getDense: () => denseObstacles, getColossal: () => colossalIncomingAsteroids, UI,
+        showScreen, startRunFromTitle, simStep };
+    }
+  }
+
   // Initialize
   init3D();
+  setupReplayCheck();
   setupTuningDrawer();
   setupMenus();
   if (/[?&]dev=1/.test(window.location.search)) setDevOverlay(true);
