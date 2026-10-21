@@ -28,7 +28,7 @@
 | **Environmental Density** | **High-Density Hazard Fields:** Abandon realistic sparse spacing; dense asteroid belts, shattered orbital stations, spaceship graveyards. | *"abandon realistic space spacing. The levels need to be incredibly dense navigational hazards... asteroid belt also can be a way."* |
 | **Doom Detection ("The Void")** | **Predictive 13–40s Lookahead:** Continuous background check terminating runs if zero reachable obstacles exist in the 13–40s horizon or velocity drops near zero. | *"If the engine calculates the player's trajectory will not intersect... trigger a dramatic failure state... in the next 13 to 40 seconds."* — Existential dread. |
 | **UI & Player Feedback** | **"Blind Math" — No Trajectory Lines:** UI must NOT draw predictive arcs or ghost lines. Skill ceiling comes from intuiting 1:4 displacement. | *"The 'Blind Math' Frustration is not a problem it is to learn the intuition."* |
-| Input | **Two buttons only**: A = spin counter-clockwise, D = spin clockwise. Letting go = stop = release = kick | *"for pc A and D looks good. only two buttons for now to spin the mace, moment of stopping is the moment of release. everything can be controles by this i think."* |
+| Input | **Two buttons only**: A = spin counter-clockwise, D = spin clockwise. Letting go = stop *(kick superseded by Push-Off & Honest Momentum: release no longer changes the CoM path)* | *"for pc A and D looks good. only two buttons for now to spin the mace, moment of stopping is the moment of release. everything can be controles by this i think."* |
 | SOCD Rule | **Last-Input-Priority with fallback to held**: holding A then tapping D switches spin to CW; releasing D reverts to CCW; releasing both fires the kick. | Ensures zero deadzone and zero accidental releases during fast directional switches. |
 
 
@@ -180,6 +180,13 @@
 
 ---
 
+### Push-Off & Honest Momentum Checklist (Core Feel Prototype) ✅
+- [x] Phase 1: removed release kick, `LateralVelocity`, damping and kick-model machinery; every velocity change writes `CoMVelocity` and persists; Colossal crash uses relative speed.
+- [x] Phase 2: one-button push-off (`findPushAnchor` / `executePushOff`), release buffer, whiff, in-reach rim, reach ring; doom reach = `PushReachCm`.
+- [x] Phase 3: Colossal reuses push-off; lock-on/mouse aim removed; overpower is emergent (crash vs bump on closing speed).
+- [x] Phase 4: first-flight hint, first-3-runs SPACE cue, How to Play rewritten, GDD/README/PROGRESS updated, `dist/` rebuilt.
+- [ ] **TODO (follow-up, out of scope here):** port honest momentum + push-off to UE C++ (`UMomentumTransferComponent`, `KineticPushSolver`).
+
 ## Roadmap
 
 | Step | Goal | Status |
@@ -207,3 +214,4 @@
 | 2026-10-15 | Step 6 Sector Progression, Milestones & Leaderboards | Implemented UE 5.8 `USpaceSectorProgressionSubsystem`, `USpaceMentumSaveGame`, `ASpaceSectorExitPortalActor`, `ASpaceMilestoneGateActor`, `FSectorFlightScore` composite scoring formula, `EKineticFlightGrade` evaluation ($S+, S, A, B, C$), and editor asset generation script `GenerateStep6ProgressionAssets.py`. Fully mirrored in companion web prototype with 3 distinct sectors, milestone arches, jump portal event horizon breach, victory debrief modal, and localStorage pilot profile persistence. |
 | 2026-10-15 | Step 7 High-Fidelity Asset Pipeline, Audio/Visual Polish & Packaging | Implemented UE 5.8 mechanical arm rigging & mace physics constraint component, live PBR dynamic material instances, data-driven material palette (`USpaceMaterialPaletteDataAsset`), procedural engine hum drone, proximity radar audio alert with distance cadence scaling (< 25m), portal vacuum collapse sound, Win64 packaging pipeline (`PackageSpaceMentumWin64.ps1/.bat`), offline asset validation suite (49/49 passed), and interactive 3D web companion mirror with standalone distribution build (`dist/`). |
 | 2026-10-21 | Minimal Game HUD — phase 8 Polish + ship | Creator request: *"make the game screen minimalistic with only the information needed. the interface doesnt look vary playagle and game like right now."* Removed dead CSS, added reduced-motion + 4K HUD scaling, verified 720p/4K and the Colossal overpower toast headlessly, bumped cache-bust to `?v=9.0` and package to 0.8.0, synced `dist/`. See `Docs/PLAN_MinimalGameHUD.md` §6.1/§7. |
+| 2026-10-21 | Push-Off & Honest Momentum (phases 1-4) | Creator feedback: *"the controls for pushing on the rocks needs to be re thinked. current one i dont know how to."* / *"the the space ship shouldent move the center of mass and stay there after a regular spin. that sodent happen in frictionless space"*. Web prototype only: releasing a spin no longer changes the CoM path or decays; steering is now one-button push-off (hold SPACE, release near a rock) plus mace strikes; Colossal lock-on removed. See `Docs/PLAN_PushOffAndHonestMomentum.md`. UE C++ port pending (TODO above). |

@@ -18,7 +18,7 @@
 
 | Aspect | Creator's Vision & Direct Quote | Underlying Emotional Resonance & Design Meaning |
 | :--- | :--- | :--- |
-| **The Core Sensation** | *"the concept is a space person zooming in the forward direction in a uniform velocity and the person has a mace in his hand. by spinning and stopping the spin in a pertiicular direction, one can stir their direction to move away from obsticles. ill include abilities and obsticles through time with flavour. it has physics."* | **Thrilling vulnerability mixed with heavy kinetic power.** The feeling of relentless forward speed where your only salvation is mastering the physical weight and centrifugal kick of a spinning weapon to whip yourself out of harm's way. |
+| **The Core Sensation** | *"the concept is a space person zooming in the forward direction in a uniform velocity and the person has a mace in his hand. by spinning and stopping the spin in a pertiicular direction, one can stir their direction to move away from obsticles. *(superseded: see Rule 1, Creator update)* ill include abilities and obsticles through time with flavour. it has physics."* | **Thrilling vulnerability mixed with heavy kinetic power.** The feeling of relentless forward speed where your only salvation is mastering the physical weight and centrifugal kick of a spinning weapon to whip yourself out of harm's way. |
 | **Quality Standard** | *"lets go for quality and hence unreal engine make most sense to me"* | **Uncompromising visual and physical excellence.** Rejection of cheap or lightweight shortcuts; desire for a rich, breathtaking, cinematic AAA space odyssey where space feels vast and the mace feels genuinely heavy. |
 | **Documentation & Code Philosophy** | *"it is a rule to add my emotions, likings, reasonings, quotes too in all documentations .mds, docstrings, comments, everywhere so we never deviate from my feels."* | **Soul-driven engineering.** Code and documentation must never lose touch with human passion and aesthetic intent. Comments must explain the *emotional goal* of a variable or function, not just the raw arithmetic. |
 | **The Void / Soft-Lock** | *"If the engine calculates the player's trajectory will not intersect... trigger a dramatic failure state... in the next 13 to 40 seconds."* | **Existential Dread.** The terror of space isn't just crashing; it's drifting helplessly. The game must mercilessly cut off doomed runs to keep the adrenaline high and pacing fast. |
@@ -37,6 +37,7 @@ When writing C++, Blueprints, shaders, or configs in this project, every file he
  *
  * @creator_feel
  * "by spinning and stopping the spin in a pertiicular direction, one can stir their direction..."
+ * (SUPERSEDED: releasing a spin no longer kicks the CoM. See Rule 1, Creator update.)
  *
  * @emotional_intent
  * The player should feel a sudden, satisfying "whiplash" kick. It must feel like grabbing
@@ -109,6 +110,14 @@ The game engine must calculate two entirely different types of movement based on
 * **Internal Forces (The Dodge):** Swinging the mace in a vacuum cannot change the system's global Center of Mass (CoM). If the player swings the heavy appendage to the left, the ship's body is violently forced to the right ($m_{\text{ship}} \Delta \vec{r}_{\text{ship}} + m_{\text{mace}} \Delta \vec{r}_{\text{mace}} = 0$). The player uses this to dodge obstacles, but if they pull the appendage back to neutral, their body snaps back to the CoM line. This creates a "physics debt."
 * **Rotational Forces (The Spin):** Conservation of angular momentum is strictly enforced ($I_{\text{ship}} \omega_{\text{ship}} + I_{\text{mace}} \omega_{\text{mace}} = 0$). If the player spins the appendage clockwise, the main body of the ship must instantly counter-rotate counter-clockwise.
 * **External Forces (The Strike & The Push):** The **ONLY** way to permanently change the trajectory of the ship's Center of Mass is to physically strike or push the appendage against an external obstacle (e.g., the starting asteroid or oncoming navigational hazards). The collision/push transfers momentum, granting the player a new directional velocity vector $\Delta \vec{v}_{\text{CoM}} = \frac{\vec{J}_{\text{ext}}}{M_{\text{system}}}$.
+
+> **Creator update (Push-Off & Honest Momentum):**
+> *"the controls for pushing on the rocks needs to be re thinked. current one i dont know how to."*
+> *"the the space ship shouldent move the center of mass and stay there after a regular spin. that sodent happen in frictionless space"*
+>
+> **Releasing a spin never changes the CoM path.** Spinning the mace only shifts the body around the CoM; letting go just stops the spin. Steering = **push-off (hold SPACE, release near a rock)** and **mace strikes**. Nothing the player earns decays on its own in frictionless space.
+>
+> This **supersedes** the original concept line *"by spinning and stopping the spin in a pertiicular direction, one can stir their direction..."* (kept above as the Creator's original words).
 
 ### Rule 2: Win & Progression Conditions
 

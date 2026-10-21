@@ -1,6 +1,6 @@
 {
   "name": "spacementum-core-feel-prototype",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "SpaceMentum — 3D Interactive Core Feel Prototype (Minimal Game HUD & Playable Game Flow)",
   "main": "app.js",
   "scripts": {

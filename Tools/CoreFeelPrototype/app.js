@@ -290,6 +290,8 @@
     PushAnchor: null,
     PushBuffer: null,    // { until, charge } armed by an early release
     MaceSnap: null,      // { targetRad, remaining } visual arm reach on push-off
+    PushCue: null,       // { obs, until } one-shot SPACE glyph near the first rock in reach
+    PushCueShown: false,
   };
 
   // --- Held Input Flags ---
@@ -1011,6 +1013,7 @@
       State.KineticPushCharge = 0.0;
       State.bIsChargingKineticPush = false;
       clearPushState();
+      resetPushCue();
       clearToasts();
       State.ProximityAlarm.threatRatio = 0.0;
       State.ProximityAlarm.nearestPos = null;
@@ -1049,6 +1052,7 @@
     State.bIsChargingKineticPush = false;
     State.KineticPushCharge = 0.0;
     clearPushState();
+    resetPushCue();
 
     State.CoMPosition.x = 0.0;
     State.CoMPosition.y = 0.0;
@@ -2571,6 +2575,11 @@
     State.MaceSnap = null;
   }
 
+  function resetPushCue() {
+    State.PushCue = null;
+    State.PushCueShown = false;
+  }
+
   function startPushCharge() {
     if (State.RunPhase !== 'Running') return;
     State.bIsChargingKineticPush = true;
@@ -2594,6 +2603,15 @@
   }
 
   function updatePushOff(dt) {
+    // First-runs teaching cue: the first time any rock enters reach in a run
+    if (!State.PushCueShown && HUD.hintRuns <= HINT_MAX_RUNS) {
+      const first = findPushAnchor();
+      if (first) {
+        State.PushCueShown = true;
+        State.PushCue = { obs: first, until: performance.now() + 1000 };
+      }
+    }
+
     // Buffered early release: fire when a rock enters reach, otherwise whiff.
     if (State.PushBuffer) {
       const anchor = findPushAnchor();
@@ -3568,12 +3586,38 @@
     HUD.launchHold = document.getElementById('btn-charge-push');
     HUD.launchHoldText = document.getElementById('charge-btn-text');
     HUD.hints = document.getElementById('hud-hints');
+    HUD.pushCue = document.getElementById('push-cue');
     HUD.vignette = document.getElementById('vignette-proximity');
     HUD.chevron = document.getElementById('threat-chevron');
     HUD.impactTag = document.getElementById('impact-tag');
     HUD.doomOverlay = document.getElementById('doom-overlay');
     HUD.hintRuns = readHintRuns();
     HUD.ready = true;
+  }
+
+  function updatePushCue() {
+    const el = HUD.pushCue;
+    if (!el) return;
+    const cue = State.PushCue;
+    if (!cue) {
+      if (!el.classList.contains('hidden')) el.classList.add('hidden');
+      return;
+    }
+    const remainingMs = cue.until - performance.now();
+    if (remainingMs <= 0 || cue.obs.destroyed) {
+      State.PushCue = null;
+      el.classList.add('hidden');
+      return;
+    }
+    const p = getPushObstacleCenter(cue.obs).clone().project(camera);
+    if (p.z > 1.0) {
+      el.classList.add('hidden');
+      return;
+    }
+    el.style.left = `${(p.x * 0.5 + 0.5) * window.innerWidth}px`;
+    el.style.top = `${(-p.y * 0.5 + 0.5) * window.innerHeight}px`;
+    el.style.opacity = String(Math.min(1, remainingMs / 300));
+    el.classList.remove('hidden');
   }
 
   // Only touch the DOM when a value actually changed
@@ -3722,14 +3766,15 @@
     // Key hints: launch phase, plus first 8s of flight on the first 3 runs
     let hintText = '';
     if (isCorridor && State.RunPhase === 'LaunchPushOff') {
-      hintText = 'A / D spin \u00B7 release to kick \u00B7 ESC pause';
+      hintText = 'A / D aim \u00B7 ESC pause';
     } else if (State.RunPhase === 'Running' && HUD.hintRuns <= HINT_MAX_RUNS && State.ActiveFlightTimeSeconds < 8.0) {
-      hintText = isCorridor
-        ? 'A / D spin \u00B7 release to kick \u00B7 ESC pause'
-        : 'CLICK/F lock \u00B7 hold SPACE push \u00B7 ESC pause';
+      hintText = 'HOLD SPACE \u00B7 LET GO NEAR A ROCK TO PUSH OFF\nA / D swing the mace';
     }
     setHudText(HUD.hints, hintText);
     HUD.hints.classList.toggle('hidden', hintText === '');
+
+    // Contextual SPACE glyph beside the first rock that comes into push reach (first runs only)
+    updatePushCue();
 
     // Alerts: proximity vignette + edge chevron + IMPACT tag, doom overlay
     updateHudAlerts();

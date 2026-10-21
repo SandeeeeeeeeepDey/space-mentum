@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=9.0">
+  <link rel="stylesheet" href="style.css?v=9.1">
   <!-- Three.js for 3D Viewport & Cinematic Chase Camera -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
@@ -62,7 +62,9 @@
       </div>
 
       <!-- Key hints: launch phase + first runs only -->
-      <div id="hud-hints" class="hud-hints hud-label hidden">A / D spin &middot; release to kick &middot; ESC pause</div>
+      <div id="hud-hints" class="hud-hints hud-label hidden">HOLD SPACE &middot; LET GO NEAR A ROCK TO PUSH OFF<br>A / D swing the mace</div>
+      <!-- First-runs cue: SPACE glyph beside the first rock in push reach -->
+      <div id="push-cue" class="push-cue hidden"><kbd>SPACE</kbd></div>
       <!-- Alerts: toasts, proximity vignette + threat chevron, doom overlay -->
       <div id="toast-layer" class="toast-layer"></div>
       <div id="vignette-proximity" class="vignette-proximity"></div>
@@ -374,15 +376,9 @@
     <div id="screen-howto" class="screen-overlay screen-sub hidden">
       <div class="menu-column menu-column-wide">
         <h2 class="menu-heading">HOW TO PLAY</h2>
-        <div class="howto-section hud-label">Corridor</div>
-        <div class="howto-row"><span class="howto-keys"><kbd>A</kbd><kbd>D</kbd></span><span>Spin the mace. Spinning is your only engine &mdash; and the only way to steer.</span></div>
-        <div class="howto-row"><span class="howto-keys"><kbd>SPACE</kbd></span><span>At launch, hold to charge your push-off and release to fly. Aim with A / D first.</span></div>
-        <div class="howto-row"><span class="howto-keys"><kbd>RELEASE</kbd></span><span>Let go of A / D to kick sideways. The mace strikes rocks and flings you the other way.</span></div>
-        <div class="howto-row"><span class="howto-keys"><kbd>&#9678;</kbd></span><span>Reach the jump portal. Clean gates and mace strikes score. Hit a rock and the run is over.</span></div>
-        <div class="howto-section hud-label">Colossal Belt</div>
-        <div class="howto-row"><span class="howto-keys"><kbd>MOUSE</kbd></span><span>Giant asteroids come at you from all sides. Move the cursor to aim at one.</span></div>
-        <div class="howto-row"><span class="howto-keys"><kbd>CLICK</kbd><kbd>F</kbd></span><span>Lock onto the asteroid under the cursor.</span></div>
-        <div class="howto-row"><span class="howto-keys"><kbd>SPACE</kbd></span><span>Hold to charge a push, release to blast it away. Inside 18 m a weak push fails and the asteroid pushes you instead.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>SPACE</kbd></span><span><b>Hold, then let go:</b> push off rocks (and off the launch rock) to change course.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>A</kbd><kbd>D</kbd></span><span><b>Swing the mace.</b> It shifts your body and smacks rocks, but on its own it can't change where you're going.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>&#8734;</kbd></span><span><b>You can't brake.</b> Run out of rocks within reach and you're lost to the void.</span></div>
         <div class="menu-list">
           <button class="menu-item" data-action="back">BACK<span class="menu-item-key">ESC</span></button>
         </div>
@@ -524,6 +520,6 @@
 
   </div>
 
-  <script src="app.js?v=9.0"></script>
+  <script src="app.js?v=9.1"></script>
 </body>
 </html>

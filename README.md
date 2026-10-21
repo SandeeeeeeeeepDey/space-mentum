@@ -2,14 +2,15 @@
 
 > *"the concept is a space person zooming in the forward direction in a uniform velocity and the person has a mace in his hand. by spinning and stopping the spin in a pertiicular direction, one can stir their direction to move away from obsticles."*: the Creator
 
-A physics-driven space odyssey built in **Unreal Engine 5.8**. You can't brake and you can't turn. The only way to steer is to spin a heavy mace and let it go at the right moment.
+A physics-driven space odyssey built in **Unreal Engine 5.8**. You can't brake and you can't turn. The only way to change course is to push off rocks and strike them with a heavy mace.
 
 ## Controls (prototype)
 | Key | Action |
 | :--- | :--- |
-| **A** (hold) | Spin mace counter-clockwise |
-| **D** (hold) | Spin mace clockwise |
-| *(let go)* | Mace stops and its momentum kicks you sideways |
+| **A** / **D** (hold) | Swing the mace (shifts your body and smacks rocks; it can't change your course on its own) |
+| **SPACE** (hold, release) | Wind up and push off a nearby rock (also launches you off the start rock) |
+| **Esc** | Pause |
+| **R** | Restart |
 
 ## Getting Started
 1. Install **Unreal Engine 5.8** (Epic Games Launcher) and **Visual Studio 2022** with the *Game development with C++* workload.

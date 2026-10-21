@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=9.0">
+  <link rel="stylesheet" href="style.css?v=9.1">
   <!-- Three.js for 3D Viewport & Cinematic Chase Camera -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
@@ -62,7 +62,9 @@
       </div>
 
       <!-- Key hints: launch phase + first runs only -->
-      <div id="hud-hints" class="hud-hints hud-label hidden">A / D spin &middot; release to kick &middot; ESC pause</div>
+      <div id="hud-hints" class="hud-hints hud-label hidden">HOLD SPACE &middot; LET GO NEAR A ROCK TO PUSH OFF<br>A / D swing the mace</div>
+      <!-- First-runs cue: SPACE glyph beside the first rock in push reach -->
+      <div id="push-cue" class="push-cue hidden"><kbd>SPACE</kbd></div>
       <!-- Alerts: toasts, proximity vignette + threat chevron, doom overlay -->
       <div id="toast-layer" class="toast-layer"></div>
       <div id="vignette-proximity" class="vignette-proximity"></div>
@@ -130,11 +132,6 @@
             <div id="stat-com-deflection" class="metric-sub">Deflection: +0.0 / +0.0</div>
           </div>
           <div class="metric-card">
-            <div class="metric-label">KICK MODEL [PRESS M]</div>
-            <div id="stat-kick-model" class="metric-value highlight-gold">Reaction Recoil</div>
-            <div class="metric-sub">J = -α · m · v_t</div>
-          </div>
-          <div class="metric-card">
             <div class="metric-label">13–40s DOOM LOOKAHEAD</div>
             <div id="stat-doom-status" class="metric-value highlight-emerald">SAFE (TRAJECTORY CLEAR)</div>
             <div id="stat-doom-proxies" class="metric-sub">Reachable Anchors: 0 in window</div>
@@ -149,15 +146,10 @@
             <div id="stat-score" class="metric-value highlight-gold">0 PTS</div>
             <div id="stat-score-sub" class="metric-sub">STREAK: 0x | GRADE: S</div>
           </div>
-          <div class="metric-card kinetic-card" id="card-kinetic-target">
-            <div class="metric-label">KINETIC TARGET LOCK [F]</div>
-            <div id="stat-target-status" class="metric-value highlight-cyan">NO TARGET</div>
-            <div id="stat-target-metrics" class="metric-sub">Aim at asteroid to acquire</div>
-          </div>
           <div class="metric-card kinetic-card" id="card-push-force">
-            <div class="metric-label">KINETIC PUSH [SPACE]</div>
-            <div id="stat-push-force" class="metric-value highlight-gold">0.0 kN</div>
-            <div id="stat-push-status" class="metric-sub">Capacitor: 0% Ready</div>
+            <div class="metric-label">PUSH CHARGE [SPACE]</div>
+            <div id="stat-push-force" class="metric-value highlight-gold">0%</div>
+            <div id="stat-push-status" class="metric-sub">Hold SPACE to wind up</div>
           </div>
         </div>
       </header>
@@ -253,14 +245,31 @@
           <input type="range" id="slider-max-speed" min="360" max="2160" value="1080" step="60">
         </div>
 
+        <div class="drawer-section-divider">PUSH-OFF</div>
+
         <div class="slider-group">
-          <label>Impulse Efficiency (α): <span id="val-alpha">0.65</span></label>
-          <input type="range" id="slider-alpha" min="0.1" max="1.5" value="0.65" step="0.05">
+          <label>Push Reach: <span id="val-push-reach">650</span> cm</label>
+          <input type="range" id="slider-push-reach" min="200" max="1500" value="650" step="10">
         </div>
 
         <div class="slider-group">
-          <label>Lateral Damping (λ): <span id="val-damping">1.50</span> /s</label>
-          <input type="range" id="slider-damping" min="0.2" max="4.0" value="1.5" step="0.1">
+          <label>Charge Rate: <span id="val-push-charge-rate">0.9</span> /s</label>
+          <input type="range" id="slider-push-charge-rate" min="0.3" max="3.0" value="0.9" step="0.05">
+        </div>
+
+        <div class="slider-group">
+          <label>Min Charge (tap): <span id="val-push-min-charge">0.15</span></label>
+          <input type="range" id="slider-push-min-charge" min="0.0" max="0.5" value="0.15" step="0.01">
+        </div>
+
+        <div class="slider-group">
+          <label>Max Push Δv: <span id="val-push-max-dv">1400</span> cm/s</label>
+          <input type="range" id="slider-push-max-dv" min="400" max="3000" value="1400" step="50">
+        </div>
+
+        <div class="slider-group">
+          <label>Release Buffer: <span id="val-push-buffer">150</span> ms</label>
+          <input type="range" id="slider-push-buffer" min="0" max="500" value="150" step="10">
         </div>
 
         <div class="drawer-section-divider">STEP 5: VISUALS & DYNAMIC AUDIO</div>
@@ -320,18 +329,8 @@
         </div>
 
         <div class="slider-group">
-          <label>Max Kinetic Push Force: <span id="val-push-force">50</span> kN</label>
-          <input type="range" id="slider-push-force" min="10" max="100" value="50" step="5">
-        </div>
-
-        <div class="slider-group">
-          <label>Critical Danger Distance: <span id="val-crit-dist">18</span> m</label>
-          <input type="range" id="slider-crit-dist" min="8" max="35" value="18" step="1">
-        </div>
-
-        <div class="slider-group">
-          <label>Asteroid Overpower Ratio: <span id="val-overpower-ratio">1.35</span>x</label>
-          <input type="range" id="slider-overpower-ratio" min="0.5" max="3.0" value="1.35" step="0.05">
+          <label>Colossal Crash Speed: <span id="val-crash-speed">900</span> cm/s</label>
+          <input type="range" id="slider-crash-speed" min="300" max="2000" value="900" step="50">
         </div>
 
         <div class="button-row">
@@ -341,29 +340,6 @@
         </div>
       </div>
     </aside>
-    </div>
-
-    <!-- Cybernetic 3D Aiming Crosshair -->
-    <div id="aim-crosshair-3d" class="aim-crosshair-3d hidden">
-      <div class="crosshair-bracket left">[</div>
-      <div class="crosshair-dot-ring"></div>
-      <div class="crosshair-bracket right">]</div>
-    </div>
-
-    <!-- Cybernetic Kinetic Lock-On Target Telemetry HUD -->
-    <div id="kinetic-target-reticle" class="kinetic-target-reticle hidden">
-      <div class="reticle-box">
-        <div class="reticle-corner tl"></div>
-        <div class="reticle-corner tr"></div>
-        <div class="reticle-corner bl"></div>
-        <div class="reticle-corner br"></div>
-        <div class="reticle-rot-ring"></div>
-        <div class="reticle-center-marker"></div>
-      </div>
-      <div class="target-line hud-label">
-        <span id="target-range">48m</span> &middot; <span id="target-tti">2.1s</span>
-        <span id="target-proximity-dilemma" class="target-too-close hidden">TOO CLOSE</span>
-      </div>
     </div>
 
     <!-- Game flow screens (Creator: "the interface doesnt look vary playagle and game like right now.") -->
@@ -400,15 +376,9 @@
     <div id="screen-howto" class="screen-overlay screen-sub hidden">
       <div class="menu-column menu-column-wide">
         <h2 class="menu-heading">HOW TO PLAY</h2>
-        <div class="howto-section hud-label">Corridor</div>
-        <div class="howto-row"><span class="howto-keys"><kbd>A</kbd><kbd>D</kbd></span><span>Spin the mace. Spinning is your only engine &mdash; and the only way to steer.</span></div>
-        <div class="howto-row"><span class="howto-keys"><kbd>SPACE</kbd></span><span>At launch, hold to charge your push-off and release to fly. Aim with A / D first.</span></div>
-        <div class="howto-row"><span class="howto-keys"><kbd>RELEASE</kbd></span><span>Let go of A / D to kick sideways. The mace strikes rocks and flings you the other way.</span></div>
-        <div class="howto-row"><span class="howto-keys"><kbd>&#9678;</kbd></span><span>Reach the jump portal. Clean gates and mace strikes score. Hit a rock and the run is over.</span></div>
-        <div class="howto-section hud-label">Colossal Belt</div>
-        <div class="howto-row"><span class="howto-keys"><kbd>MOUSE</kbd></span><span>Giant asteroids come at you from all sides. Move the cursor to aim at one.</span></div>
-        <div class="howto-row"><span class="howto-keys"><kbd>CLICK</kbd><kbd>F</kbd></span><span>Lock onto the asteroid under the cursor.</span></div>
-        <div class="howto-row"><span class="howto-keys"><kbd>SPACE</kbd></span><span>Hold to charge a push, release to blast it away. Inside 18 m a weak push fails and the asteroid pushes you instead.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>SPACE</kbd></span><span><b>Hold, then let go:</b> push off rocks (and off the launch rock) to change course.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>A</kbd><kbd>D</kbd></span><span><b>Swing the mace.</b> It shifts your body and smacks rocks, but on its own it can't change where you're going.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>&#8734;</kbd></span><span><b>You can't brake.</b> Run out of rocks within reach and you're lost to the void.</span></div>
         <div class="menu-list">
           <button class="menu-item" data-action="back">BACK<span class="menu-item-key">ESC</span></button>
         </div>
@@ -550,6 +520,6 @@
 
   </div>
 
-  <script src="app.js?v=9.0"></script>
+  <script src="app.js?v=9.1"></script>
 </body>
 </html>
