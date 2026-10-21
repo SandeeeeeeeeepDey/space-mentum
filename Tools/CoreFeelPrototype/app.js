@@ -43,10 +43,6 @@
     // FMomentumTransferTuning
     AstronautMassKg: 160.0, // Default 1:4 mass ratio against 40 kg mace
     ImpulseEfficiencyAlpha: 0.65,
-    KickModel: 'ReactionRecoil', // 'ReactionRecoil' or 'CarryAlong'
-    MinAngularSpeedForKickDegPerSec: 90.0,
-    LateralDampingPerSec: 1.5,
-    MaxLateralSpeedCmPerSec: 1800.0,
 
     // FForwardDriftTuning
     ForwardSpeedCmPerSec: 3000.0, // 108 km/h sacred forward drift (30 m/s)
@@ -250,9 +246,6 @@
     // System Center of Mass World Position & Velocity
     CoMPosition: { x: 0.0, y: 0.0, z: 0.0 },
     CoMVelocity: { x: 0.0, y: 0.0, z: 0.0 }, // 0 at launch anchor; base drift after push-off
-
-    // Internal Dodging Velocity (exponentially damped kicks)
-    LateralVelocity: { y: 0.0, z: 0.0 },
 
     // Internal 1:4 Two-Body Counter-Displacement (The Dodge)
     InternalDisplacement: { y: 0.0, z: 0.0 },
@@ -669,7 +662,7 @@
     whiteNoise.stop(now + 0.35);
   }
 
-  function playKickSound() {
+  function playKickSound(gainScale = 1.0) {
     const ctx = getAudioContext();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -681,7 +674,7 @@
     osc.frequency.setValueAtTime(190, now);
     osc.frequency.exponentialRampToValueAtTime(32, now + 0.18);
 
-    gain.gain.setValueAtTime(0.65, now);
+    gain.gain.setValueAtTime(0.65 * gainScale, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
 
     osc.connect(gain);
@@ -866,56 +859,19 @@
       State.HeldSpinDirection = 'Clockwise';
     } else {
       if (State.HeldSpinDirection !== 'None') {
-        executeMomentumKick();
+        stopSpin();
       }
       State.HeldSpinDirection = 'None';
     }
   }
 
-  // --- Momentum Kick (The Internal Release) ---
-  function executeMomentumKick() {
-    const absOmega = Math.abs(State.AngularVelocityRadPerSec);
-    const minOmegaRad = Tuning.MinAngularSpeedForKickDegPerSec * (Math.PI / 180);
-
-    if (absOmega < minOmegaRad) {
-      State.AngularVelocityRadPerSec = 0;
-      return;
-    }
-
-    const cosT = Math.cos(State.OrbitAngleRad);
-    const sinT = Math.sin(State.OrbitAngleRad);
-    const sign = State.AngularVelocityRadPerSec >= 0 ? 1.0 : -1.0;
-    const tanSpeed = absOmega * Tuning.TetherLengthCm;
-
-    const tanVelY = -sinT * sign * tanSpeed;
-    const tanVelZ = cosT * sign * tanSpeed;
-
-    const impulseMag = Tuning.ImpulseEfficiencyAlpha * Tuning.MaceMassKg * tanSpeed;
-    const modelMult = Tuning.KickModel === 'ReactionRecoil' ? -1.0 : 1.0;
-    const totalMass = Tuning.AstronautMassKg + Tuning.MaceMassKg;
-    const deltaV = (impulseMag * modelMult) / totalMass;
-
-    const tanLen = Math.hypot(tanVelY, tanVelZ) || 1.0;
-    const kickUnitY = (tanVelY / tanLen) * modelMult;
-    const kickUnitZ = (tanVelZ / tanLen) * modelMult;
-
-    State.LateralVelocity.y += kickUnitY * deltaV;
-    State.LateralVelocity.z += kickUnitZ * deltaV;
-
-    const currentLatSpeed = Math.hypot(State.LateralVelocity.y, State.LateralVelocity.z);
-    if (currentLatSpeed > Tuning.MaxLateralSpeedCmPerSec) {
-      const scale = Tuning.MaxLateralSpeedCmPerSec / currentLatSpeed;
-      State.LateralVelocity.y *= scale;
-      State.LateralVelocity.z *= scale;
-    }
-
+  // --- Spin Stop (Internal Release: no velocity change, ever) ---
+  function stopSpin() {
+    // Spinning the mace is an internal force: it can shift the body around the CoM
+    // but can never change the CoM path. Letting go just halts the spin.
+    const bWasSpinning = Math.abs(State.AngularVelocityRadPerSec) > 0.5;
     State.AngularVelocityRadPerSec = 0.0;
-
-    playKickSound();
-    triggerKickFlash();
-
-    const kickRatio = Math.min(1.0, currentLatSpeed / Tuning.MaxLateralSpeedCmPerSec);
-    State.TargetFOV = Math.min(104.0, 80.0 + kickRatio * 18.0);
+    if (bWasSpinning) playKickSound(0.18);
   }
 
   // --- External Strike Momentum Transfer ---
@@ -1068,7 +1024,6 @@
       State.RunPhase = 'Running';
       State.CoMPosition.x = 0.0; State.CoMPosition.y = 0.0; State.CoMPosition.z = 0.0;
       State.CoMVelocity.x = 400.0; State.CoMVelocity.y = 0.0; State.CoMVelocity.z = 0.0;
-      State.LateralVelocity.y = 0.0; State.LateralVelocity.z = 0.0;
       State.AngularVelocityRadPerSec = 0.0;
       State.OrbitAngleRad = 0.0;
       State.HeldSpinDirection = 'None';
@@ -1119,8 +1074,6 @@
     State.CoMVelocity.x = 0.0;
     State.CoMVelocity.y = 0.0;
     State.CoMVelocity.z = 0.0;
-    State.LateralVelocity.y = 0.0;
-    State.LateralVelocity.z = 0.0;
     State.AngularVelocityRadPerSec = 0.0;
     State.OrbitAngleRad = 0.0;
     State.HeldSpinDirection = 'None';
@@ -1177,11 +1130,6 @@
       exitPortalLight.intensity = 12000.0;
     }
 
-    updateHUD();
-  }
-
-  function toggleKickModel() {
-    Tuning.KickModel = Tuning.KickModel === 'ReactionRecoil' ? 'CarryAlong' : 'ReactionRecoil';
     updateHUD();
   }
 
@@ -1267,21 +1215,10 @@
     const rotRatio = Math.min(Im / Is, 3.5);
     State.CounterRotationRad = -rotRatio * State.OrbitAngleRad;
 
-    // 5. Exponential decay on internal lateral dodging kicks
-    if (Tuning.LateralDampingPerSec > 0) {
-      const decay = Math.exp(-Tuning.LateralDampingPerSec * dt);
-      State.LateralVelocity.y *= decay;
-      State.LateralVelocity.z *= decay;
-      if (Math.hypot(State.LateralVelocity.y, State.LateralVelocity.z) < 0.1) {
-        State.LateralVelocity.y = 0;
-        State.LateralVelocity.z = 0;
-      }
-    }
-
     // 6. Update System Center of Mass World Position
     State.CoMPosition.x += State.CoMVelocity.x * dt;
-    State.CoMPosition.y += (State.CoMVelocity.y + State.LateralVelocity.y) * dt;
-    State.CoMPosition.z += (State.CoMVelocity.z + State.LateralVelocity.z) * dt;
+    State.CoMPosition.y += State.CoMVelocity.y * dt;
+    State.CoMPosition.z += State.CoMVelocity.z * dt;
 
     // 7. Collision Evaluations (Appendage Deflections & Body Crashes)
     evaluateContinuousCollisions();
@@ -1304,7 +1241,7 @@
       }
     }
     updateProximityRadarAlarm(minObsDistCm, performance.now() / 1000.0, nearestObsPos);
-    updateContinuousEngineHumAudio(State.CoMVelocity.x, Math.hypot(State.LateralVelocity.y, State.LateralVelocity.z));
+    updateContinuousEngineHumAudio(State.CoMVelocity.x, Math.hypot(State.CoMVelocity.y, State.CoMVelocity.z));
 
     // 8. Slalom Gate Evasions
     evaluateSlalomCrossings();
@@ -1313,8 +1250,8 @@
     State.ActiveFlightTimeSeconds += dt;
     const currentTotalSpeed = Math.hypot(
       State.CoMVelocity.x,
-      State.CoMVelocity.y + State.LateralVelocity.y,
-      State.CoMVelocity.z + State.LateralVelocity.z
+      State.CoMVelocity.y,
+      State.CoMVelocity.z
     );
     if (currentTotalSpeed > State.PeakSpeedCmPerSec) {
       State.PeakSpeedCmPerSec = currentTotalSpeed;
@@ -1414,8 +1351,8 @@
         if (distToBody <= (obs.radius + astronautBodyRadius)) {
           const totalSpeed = Math.hypot(
             State.CoMVelocity.x,
-            State.CoMVelocity.y + State.LateralVelocity.y,
-            State.CoMVelocity.z + State.LateralVelocity.z
+            State.CoMVelocity.y,
+            State.CoMVelocity.z
           );
           triggerKineticCrash(obs, totalSpeed);
           return;
@@ -1684,7 +1621,7 @@
   // --- Three.js Scene Setup & Visual Entities ---
   let scene, camera, renderer;
   let ambientLight, keyCosmicLight, rimCosmicLight;
-  let astronautAvatar, orbitRingMesh, tangentArrow, kickArrow, trajectoryLine;
+  let astronautAvatar, orbitRingMesh, tangentArrow, trajectoryLine;
   let starsParticles, tunnelRings = [];
   let denseObstacles = [];
 
@@ -1964,9 +1901,7 @@
 
     // Debug Arrows
     tangentArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(), 50, 0xffe600, 15, 8);
-    kickArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(), 60, 0x10b981, 18, 10);
     scene.add(tangentArrow);
-    scene.add(kickArrow);
 
     // Trajectory Line (Blind Math default hidden)
     const trajGeo = new THREE.BufferGeometry();
@@ -2550,7 +2485,11 @@
       const collisionThreshold = ast.radius + 40.0;
 
       if (distToPlayer <= collisionThreshold && State.RunPhase === 'Running') {
-        const relSpeed = ast.velocity.length();
+        const relSpeed = Math.hypot(
+          ast.velocity.x - State.CoMVelocity.x,
+          ast.velocity.y - State.CoMVelocity.y,
+          ast.velocity.z - State.CoMVelocity.z
+        );
         triggerKineticCrash({ name: ast.name, isAsteroid: true }, relSpeed);
         return;
       }
@@ -2637,8 +2576,8 @@
 
     const relVel = new THREE.Vector3(
       target.velocity.x - State.CoMVelocity.x,
-      target.velocity.y - (State.CoMVelocity.y + State.LateralVelocity.y),
-      target.velocity.z - (State.CoMVelocity.z + State.LateralVelocity.z)
+      target.velocity.y - State.CoMVelocity.y,
+      target.velocity.z - State.CoMVelocity.z
     );
 
     const unitToTarget = toTarget.clone().normalize();
@@ -2753,8 +2692,8 @@
       triggerAsteroidOverpowerFlash();
 
       State.CoMVelocity.x -= 820.0 * Tuning.OverpowerRatio;
-      State.LateralVelocity.y += (Math.random() - 0.5) * 600.0;
-      State.LateralVelocity.z += (Math.random() - 0.5) * 400.0;
+      State.CoMVelocity.y += (Math.random() - 0.5) * 600.0;
+      State.CoMVelocity.z += (Math.random() - 0.5) * 400.0;
       State.CameraTrauma = 1.0;
 
       spawnKineticSparks(playerPos, 40);
@@ -2775,8 +2714,8 @@
     const deltaVPlayerCms = (impulseNs * Tuning.ImpulseEfficiencyAlpha / playerMassKg) * 100.0;
 
     State.CoMVelocity.x -= unitPush.x * deltaVPlayerCms * 0.65;
-    State.LateralVelocity.y -= unitPush.y * deltaVPlayerCms;
-    State.LateralVelocity.z -= unitPush.z * deltaVPlayerCms;
+    State.CoMVelocity.y -= unitPush.y * deltaVPlayerCms;
+    State.CoMVelocity.z -= unitPush.z * deltaVPlayerCms;
 
     playKineticPushBlastSound(forceKN);
     triggerPushDeflectionFlash(forceKN);
@@ -3290,7 +3229,7 @@
     maceCrystalMesh.rotation.y += 0.05 + speedRatio * 0.15;
 
     // Animate RCS Thruster Flames during lateral kicks
-    const latMag = Math.hypot(State.LateralVelocity.y, State.LateralVelocity.z);
+    const latMag = Math.hypot(State.CoMVelocity.y, State.CoMVelocity.z);
     const latRatio = Math.min(1.0, latMag / 1400.0);
     if (rcsFlames.length >= 2) {
       rcsFlames[0].material.opacity = latRatio;
@@ -3339,8 +3278,8 @@
         directionalArrowGroup.rotation.z = aimRad;
         directionalArrowGroup.visible = true;
       } else {
-        const velY = State.CoMVelocity.y + State.LateralVelocity.y;
-        const velZ = State.CoMVelocity.z + State.LateralVelocity.z;
+        const velY = State.CoMVelocity.y;
+        const velZ = State.CoMVelocity.z;
         const velLen = Math.hypot(State.CoMVelocity.x, velY, velZ);
 
         directionalArrowGroup.position.copy(astronautAvatar.position);
@@ -3360,7 +3299,6 @@
     // 7. Debug Gizmo Visibility (Strict Rule 4 Blind Math)
     const bDrawGizmos = !State.bBlindMath && State.bShowGizmos;
     tangentArrow.visible = bDrawGizmos;
-    kickArrow.visible = bDrawGizmos;
     trajectoryLine.visible = bDrawGizmos;
 
     if (bDrawGizmos) {
@@ -3372,11 +3310,6 @@
       tangentArrow.position.copy(maceWorldPos);
       tangentArrow.setDirection(new THREE.Vector3(0, tanY, tanZ).normalize());
       tangentArrow.setLength(Math.max(1, tanSpeed * 0.12), 15, 8);
-
-      const modelMult = Tuning.KickModel === 'ReactionRecoil' ? -1.0 : 1.0;
-      kickArrow.position.copy(astronautAvatar.position);
-      kickArrow.setDirection(new THREE.Vector3(0, tanY * modelMult, tanZ * modelMult).normalize());
-      kickArrow.setLength(Math.max(1, (tanSpeed * 0.15)), 18, 10);
 
       const trajPoints = [];
       for (let i = 0; i <= 25; i++) {
@@ -3405,7 +3338,7 @@
     camera.lookAt(State.CoMPosition.x + 800, State.CoMPosition.y * 0.8, State.CoMPosition.z * 0.8);
 
     // Dutch roll banking during lateral dodge/momentum kick
-    const totalLatY = State.CoMVelocity.y + State.LateralVelocity.y;
+    const totalLatY = State.CoMVelocity.y;
     const targetRoll = -(totalLatY / 1600.0) * (Tuning.MaxDutchRollDeg * Math.PI / 180.0);
     State.CameraRollDeg += (targetRoll - State.CameraRollDeg) * 0.15;
     camera.rotation.z += State.CameraRollDeg;
@@ -3625,7 +3558,7 @@
     if (State.RunPhase === 'LaunchPushOff') {
       headingRad = State.LaunchAimAngleDeg * (Math.PI / 180.0);
     } else {
-      const velY = State.CoMVelocity.y + State.LateralVelocity.y;
+      const velY = State.CoMVelocity.y;
       headingRad = Math.atan2(velY, State.CoMVelocity.x || 1.0);
     }
 
@@ -3823,8 +3756,8 @@
     // Speed dial
     const speedCms = Math.hypot(
       State.CoMVelocity.x,
-      State.CoMVelocity.y + State.LateralVelocity.y,
-      State.CoMVelocity.z + State.LateralVelocity.z
+      State.CoMVelocity.y,
+      State.CoMVelocity.z
     );
     setHudText(HUD.speedVal, String(Math.round(speedCms * 0.036)));
 
@@ -3986,8 +3919,8 @@
     // --- Cockpit Speedometer Updates (Rule 4 Telemetry) ---
     const totalSpeedCms = Math.hypot(
       State.CoMVelocity.x,
-      State.CoMVelocity.y + State.LateralVelocity.y,
-      State.CoMVelocity.z + State.LateralVelocity.z
+      State.CoMVelocity.y,
+      State.CoMVelocity.z
     );
     const speedKmh = totalSpeedCms * 0.036;
 
@@ -4006,7 +3939,7 @@
     }
 
     if (speedVxEl) speedVxEl.textContent = `${Math.round(State.CoMVelocity.x)} cm/s`;
-    const latMag = Math.hypot(State.CoMVelocity.y + State.LateralVelocity.y, State.CoMVelocity.z + State.LateralVelocity.z);
+    const latMag = Math.hypot(State.CoMVelocity.y, State.CoMVelocity.z);
     if (speedVlatEl) speedVlatEl.textContent = `${Math.round(latMag)} cm/s`;
 
     // --- Push Power / Rotational Kinetic Energy Widget Updates ---
@@ -4475,8 +4408,6 @@
       Input.isDPressed = true;
       Input.lastDPressTime = performance.now();
       evaluateActiveSpin();
-    } else if (key === 'm') {
-      if (UI.devOpen) toggleKickModel();
     }
   });
 
@@ -4544,7 +4475,6 @@
     bindSlider('slider-accel', Tuning, 'SpinAccelerationDegPerSec2', 'val-accel', 0);
     bindSlider('slider-max-speed', Tuning, 'MaxAngularSpeedDegPerSec', 'val-max-speed', 0);
     bindSlider('slider-alpha', Tuning, 'ImpulseEfficiencyAlpha', 'val-alpha', 2);
-    bindSlider('slider-damping', Tuning, 'LateralDampingPerSec', 'val-damping', 2);
     bindSlider('slider-fov-dilation', Tuning, 'MaxSpeedFovDilationDeg', 'val-fov-dilation', 0);
     bindSlider('slider-dutch-roll', Tuning, 'MaxDutchRollDeg', 'val-dutch-roll', 1);
 
@@ -4606,7 +4536,6 @@
         Tuning.SpinAccelerationDegPerSec2 = 1440.0;
         Tuning.MaxAngularSpeedDegPerSec = 1080.0;
         Tuning.ImpulseEfficiencyAlpha = 0.65;
-        Tuning.LateralDampingPerSec = 1.5;
         Tuning.MaxSpeedFovDilationDeg = 25.0;
         Tuning.MaxDutchRollDeg = 4.5;
         Tuning.AudioMasterVolume = 1.0;
@@ -4627,8 +4556,6 @@
         document.getElementById('val-max-speed').textContent = '1080';
         document.getElementById('slider-alpha').value = 0.65;
         document.getElementById('val-alpha').textContent = '0.65';
-        document.getElementById('slider-damping').value = 1.5;
-        document.getElementById('val-damping').textContent = '1.50';
         document.getElementById('slider-fov-dilation').value = 25;
         document.getElementById('val-fov-dilation').textContent = '25';
         document.getElementById('slider-dutch-roll').value = 4.5;
