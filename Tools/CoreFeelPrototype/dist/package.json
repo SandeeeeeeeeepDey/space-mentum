@@ -1,7 +1,7 @@
 {
   "name": "spacementum-core-feel-prototype",
-  "version": "0.7.0",
-  "description": "SpaceMentum — 3D Interactive Core Feel Prototype & Cockpit Flight Telemetry (Step 7 High-Fidelity Asset Pipeline & Polish)",
+  "version": "0.8.0",
+  "description": "SpaceMentum — 3D Interactive Core Feel Prototype (Minimal Game HUD & Playable Game Flow)",
   "main": "app.js",
   "scripts": {
     "start": "npx -y serve . -l 8080",

@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SpaceMentum — Core Feel Prototype (C++ Physics Mirror & Cockpit Flight Telemetry)</title>
+  <title>SpaceMentum</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=5.1">
+  <link rel="stylesheet" href="style.css?v=9.0">
   <!-- Three.js for 3D Viewport & Cinematic Chase Camera -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
@@ -17,6 +17,65 @@
 
   <!-- HUD Overlay -->
   <div id="hud-overlay">
+    <!-- Minimal Game HUD (Creator: "make the game screen minimalistic with only the information needed.") -->
+    <div id="game-hud" class="game-hud">
+      <!-- Top-center: progress to jump portal -->
+      <div id="hud-progress" class="hud-progress">
+        <div class="hud-progress-track">
+          <div id="hud-progress-fill" class="hud-progress-fill"></div>
+          <div id="hud-progress-marks" class="hud-progress-marks"></div>
+          <div id="hud-progress-portal" class="hud-progress-portal"></div>
+        </div>
+        <div id="hud-progress-text" class="hud-label hud-progress-text">0 / 1200 m</div>
+      </div>
+
+      <!-- Top-right: score + streak chip -->
+      <div class="hud-score">
+        <div id="hud-score-val" class="hud-score-val">0</div>
+        <div id="hud-streak" class="hud-streak hidden">x2</div>
+      </div>
+
+      <!-- Bottom-left: radar (Rule 4 instrument #2) -->
+      <div class="hud-radar">
+        <canvas id="radar-canvas" width="190" height="190"></canvas>
+      </div>
+
+      <!-- Bottom-center: speed dial + power arc (Rule 4 instruments #3 and #4) -->
+      <div class="hud-dial">
+        <svg class="hud-dial-svg" viewBox="0 0 120 120" aria-hidden="true">
+          <circle class="hud-dial-track" cx="60" cy="60" r="52"></circle>
+          <circle id="hud-power-arc" class="hud-dial-arc" cx="60" cy="60" r="52"></circle>
+        </svg>
+        <div class="hud-dial-readout">
+          <div id="hud-speed-val" class="hud-speed-val">0</div>
+          <div class="hud-label">KM/H</div>
+        </div>
+      </div>
+      <!-- Launch prompt (visible during LaunchPushOff) -->
+      <div id="launch-guidance-banner" class="launch-prompt">
+        <div class="launch-aim-row">
+          <span id="launch-key-a" class="launch-key">&#9664; A</span>
+          <span id="launch-aim-text" class="launch-heading">+0.0&deg;</span>
+          <span id="launch-key-d" class="launch-key">D &#9654;</span>
+        </div>
+        <button id="btn-charge-push" class="launch-hold"><span id="charge-btn-text">HOLD SPACE TO PUSH</span></button>
+      </div>
+
+      <!-- Key hints: launch phase + first runs only -->
+      <div id="hud-hints" class="hud-hints hud-label hidden">A / D spin &middot; release to kick &middot; ESC pause</div>
+      <!-- Alerts: toasts, proximity vignette + threat chevron, doom overlay -->
+      <div id="toast-layer" class="toast-layer"></div>
+      <div id="vignette-proximity" class="vignette-proximity"></div>
+      <div id="threat-chevron" class="threat-chevron hidden">&#10095;</div>
+      <div id="impact-tag" class="impact-tag hud-label hidden">IMPACT</div>
+      <div id="doom-overlay" class="doom-overlay hidden">
+        <div class="doom-fog"></div>
+        <div class="doom-text">NO ANCHORS IN REACH</div>
+      </div>
+    </div>
+
+    <!-- Dev Overlay: engineering telemetry + tuning drawer (toggle with ` or F3, or ?dev=1) -->
+    <div id="dev-overlay" class="dev-overlay hidden">
     <!-- Top Row: Dual Flight Panels -->
     <div class="hud-top-row">
       <!-- Top-Left Telemetry Box -->
@@ -26,6 +85,12 @@
             <span class="brand-title">SPACEMENTUM</span>
             <span class="badge">PHYSICS MIRROR</span>
             <button id="btn-sector-select" class="badge badge-sector" title="Switch Sector Gauntlet">SECTOR 1: PERSEUS SHALLOWS ▾</button>
+            <div class="screen-mode-toggle-group">
+              <button id="btn-screen-gauntlet" class="btn-screen-tab active" title="Switch to Slalom Gauntlet Corridor">CORRIDOR</button>
+              <button id="btn-screen-colossal" class="btn-screen-tab highlight-colossal" title="Switch to Screen where Asteroids are Much Bigger & Outer Belt Expansive">
+                COLOSSAL BELT <span class="tab-badge-glow">PUSH FIELD</span>
+              </button>
+            </div>
           </div>
           <div class="status-indicator">
             <span class="pulse-dot"></span>
@@ -84,6 +149,16 @@
             <div id="stat-score" class="metric-value highlight-gold">0 PTS</div>
             <div id="stat-score-sub" class="metric-sub">STREAK: 0x | GRADE: S</div>
           </div>
+          <div class="metric-card kinetic-card" id="card-kinetic-target">
+            <div class="metric-label">KINETIC TARGET LOCK [F]</div>
+            <div id="stat-target-status" class="metric-value highlight-cyan">NO TARGET</div>
+            <div id="stat-target-metrics" class="metric-sub">Aim at asteroid to acquire</div>
+          </div>
+          <div class="metric-card kinetic-card" id="card-push-force">
+            <div class="metric-label">KINETIC PUSH [SPACE]</div>
+            <div id="stat-push-force" class="metric-value highlight-gold">0.0 kN</div>
+            <div id="stat-push-status" class="metric-sub">Capacitor: 0% Ready</div>
+          </div>
         </div>
       </header>
 
@@ -91,33 +166,12 @@
       <section class="hud-panel cockpit-instrumentation-panel">
         <div class="panel-header">
           <div class="brand">
-            <span class="brand-title">FLIGHT COCKPIT</span>
+            <span class="brand-title">COCKPIT EXTRAS</span>
             <span class="badge badge-amber">RULE 4 INSTRUMENTATION</span>
-          </div>
-          <div class="radar-tag">
-            <span class="radar-live-blip"></span>
-            <span>120m LOOKAHEAD</span>
           </div>
         </div>
 
         <div class="cockpit-grid">
-          <!-- Tactical Navigational Radar Mini-Map -->
-          <div class="radar-widget">
-            <div class="widget-title-row">
-              <span class="widget-label">TACTICAL NAV RADAR</span>
-              <span id="radar-contacts-count" class="widget-counter">0 CONTACTS</span>
-            </div>
-            <div class="radar-canvas-wrapper">
-              <canvas id="radar-canvas" width="190" height="190"></canvas>
-              <div class="radar-crosshair"></div>
-            </div>
-            <div class="radar-legend">
-              <span class="legend-item"><span class="legend-dot dot-asteroid"></span>Asteroid</span>
-              <span class="legend-item"><span class="legend-dot dot-debris"></span>Debris</span>
-              <span class="legend-item"><span class="legend-dot dot-gate"></span>Gate</span>
-            </div>
-          </div>
-
           <!-- Speedometer & Push Power Cluster -->
           <div class="speed-power-cluster">
             <!-- Cybernetic Dual-Unit Speedometer -->
@@ -160,259 +214,10 @@
               <div id="power-widget-desc" class="power-desc">Hold [SPACE] to compress hydraulic ram against asteroid</div>
             </div>
 
-            <!-- Step 7 Proximity Radar Hazard Warning Widget -->
-            <div id="proximity-warning-widget" class="proximity-warning-widget safe">
-              <div class="proximity-header">
-                <span class="prox-icon">⚡</span>
-                <span id="prox-status-text" class="prox-status">PROXIMITY: CLEAR</span>
-                <span id="prox-distance-text" class="prox-distance">> 25m</span>
-              </div>
-              <div class="prox-meter-track">
-                <div id="prox-meter-bar" class="prox-meter-bar"></div>
-              </div>
-            </div>
           </div>
         </div>
       </section>
     </div>
-
-    <!-- Centered Launch Guidance Banner (Visible during LaunchPushOff) -->
-    <div id="launch-guidance-banner" class="launch-guidance-banner">
-      <div class="launch-header-tag">CELESTIAL ORIGIN ANCHOR (X = 0)</div>
-      <h2 class="launch-title">HYDRAULIC RAM LAUNCH SEQUENCE</h2>
-      <div class="launch-aim-indicator">
-        <span class="aim-arrow-icon">➔</span>
-        <span id="launch-aim-text">DEPARTURE HEADING: 0.0° [CENTER CORRIDOR]</span>
-      </div>
-      <p class="launch-instructions">
-        Steer trajectory with <strong>[A / D]</strong> • Hold <strong>[SPACE]</strong> to compress kinetic ram • Release to plunge into gauntlet
-      </p>
-      <button id="btn-charge-push" class="btn-charge-push">
-        <span class="charge-btn-icon">⚡</span>
-        <span id="charge-btn-text">HOLD [SPACE] TO CHARGE PUSH</span>
-      </button>
-    </div>
-
-    <!-- External Mace Strike Flash Banner -->
-    <div id="strike-banner" class="strike-banner hidden">
-      <div class="strike-icon">💥</div>
-      <div class="strike-text-group">
-        <div class="strike-title">EXTERNAL MACE STRIKE!</div>
-        <div id="strike-detail" class="strike-detail">Momentum transferred: +420 cm/s CoM deflection</div>
-      </div>
-    </div>
-
-    <!-- Greybox Slalom Evasion Notification Banner -->
-    <div id="slalom-banner" class="slalom-banner hidden">
-      <div class="slalom-icon" id="slalom-icon">✓</div>
-      <div class="slalom-text-group">
-        <div id="slalom-title" class="slalom-title">CLEAN EVASION!</div>
-        <div id="slalom-detail" class="slalom-detail">Gate 1 Cleared: +245 cm clearance</div>
-      </div>
-    </div>
-
-    <!-- Celestial Milestone Checkpoint Notification Banner -->
-    <div id="milestone-banner" class="milestone-banner hidden">
-      <div class="milestone-icon">✦</div>
-      <div class="milestone-text-group">
-        <div id="milestone-title" class="milestone-title">MILESTONE REACHED</div>
-        <div id="milestone-detail" class="milestone-detail">Alpha Horizon (300m) • +500 PTS</div>
-      </div>
-    </div>
-
-    <!-- Dramatic Rule 2 Win Modal: Sector Jump Portal Breached -->
-    <div id="sector-completed-modal" class="failure-modal victory-modal hidden">
-      <div class="modal-card victory-card">
-        <div class="modal-glitch-badge victory-badge">SECTOR BREACHED</div>
-        <h1 class="modal-headline victory-glow">JUMP PORTAL CLEAR</h1>
-        <p class="modal-quote">"The ultimate goal is to navigate the dense asteroid field/debris and reach a designated spatial coordinate using only momentum mechanics."</p>
-
-        <!-- Performance Grade Badge -->
-        <div class="grade-container">
-          <div class="grade-circle grade-s" id="victory-grade-circle">
-            <span id="victory-grade-letter">S</span>
-          </div>
-          <div class="grade-title-group">
-            <div id="victory-grade-title" class="grade-title">ORBITAL MAESTRO</div>
-            <div id="victory-grade-desc" class="grade-desc">Flawless Newtonian conservation & momentum control.</div>
-          </div>
-        </div>
-
-        <!-- Flight Debrief Metrics Grid -->
-        <div class="modal-diagnostics victory-grid">
-          <div class="diag-row">
-            <span class="diag-label">FLIGHT TIME:</span>
-            <span id="victory-time-val" class="diag-val cyan">34.2s (Par: 38.0s)</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">AVERAGE VELOCITY:</span>
-            <span id="victory-avg-speed-val" class="diag-val">3,120 cm/s (112.3 km/h)</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">PEAK INSTANTANEOUS SPEED:</span>
-            <span id="victory-peak-speed-val" class="diag-val">3,890 cm/s (140.0 km/h)</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">SLALOM GATES CLEARED:</span>
-            <span id="victory-gates-val" class="diag-val emerald">5 / 5 (100% CLEAN)</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">EXTERNAL MACE STRIKES:</span>
-            <span id="victory-strikes-val" class="diag-val gold">3 LANDED (+900 PTS)</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">COMPOSITE KINETIC SCORE:</span>
-            <span id="victory-score-val" class="diag-val highlight-gold">14,850 PTS</span>
-          </div>
-        </div>
-
-        <!-- High Score Leaderboard Table -->
-        <div class="modal-leaderboard-section">
-          <div class="leaderboard-header-row">
-            <span>SECTOR LEADERBOARD (PERSONAL BESTS)</span>
-            <span id="leaderboard-pb-tag" class="pb-tag hidden">★ NEW PERSONAL BEST!</span>
-          </div>
-          <div class="leaderboard-table-container">
-            <table class="leaderboard-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>PILOT</th>
-                  <th>SCORE</th>
-                  <th>GRADE</th>
-                  <th>TIME</th>
-                  <th>SPEED</th>
-                  <th>DATE</th>
-                </tr>
-              </thead>
-              <tbody id="leaderboard-tbody">
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Action Buttons -->
-        <div class="modal-button-group">
-          <button id="btn-next-sector" class="modal-action-btn primary-btn">WARP TO NEXT SECTOR ❯</button>
-          <button id="btn-restart-victory" class="modal-action-btn secondary-btn">REPLAY SECTOR [R]</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Dramatic Rule 3 Failure Modal 1: Lost to the Void -->
-    <div id="void-doom-modal" class="failure-modal void-modal hidden">
-      <div class="modal-card">
-        <div class="modal-glitch-badge">EXISTENTIAL DREAD</div>
-        <h1 class="modal-headline void-glow">LOST TO THE VOID</h1>
-        <p class="modal-quote">"If the engine calculates the player's trajectory will not intersect... trigger a dramatic failure state in the next 13 to 40 seconds."</p>
-        <div class="modal-diagnostics">
-          <div class="diag-row">
-            <span class="diag-label">FAILURE VECTOR:</span>
-            <span class="diag-val red">UNREACHABLE TRAJECTORY</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">LOOKAHEAD HORIZON:</span>
-            <span id="doom-horizon-val" class="diag-val">40.0 SECONDS</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">STRIKEABLE ANCHORS:</span>
-            <span class="diag-val red">ZERO REACHABLE</span>
-          </div>
-        </div>
-        <p class="modal-hint">The run was mercilessly terminated to preserve high-adrenaline pacing.</p>
-        <button id="btn-restart-void" class="modal-restart-btn">RETRY RUN [PRESS R]</button>
-      </div>
-    </div>
-
-    <!-- Dramatic Rule 3 Failure Modal 2: Kinetic Impact Crash -->
-    <div id="crash-modal" class="failure-modal crash-modal hidden">
-      <div class="modal-card">
-        <div class="modal-glitch-badge red-badge">KINETIC OBLITERATION</div>
-        <h1 class="modal-headline crash-glow">KINETIC IMPACT</h1>
-        <p class="modal-quote">"If the player's main body hitbox intersects with an obstacle at relative speed exceeding threshold, the ship is destroyed."</p>
-        <div class="modal-diagnostics">
-          <div class="diag-row">
-            <span class="diag-label">COLLISION VELOCITY:</span>
-            <span id="crash-speed-val" class="diag-val red">3,040 cm/s</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">HULL INTEGRITY:</span>
-            <span class="diag-val red">0% (CATASTROPHIC FAILURE)</span>
-          </div>
-        </div>
-        <button id="btn-restart-crash" class="modal-restart-btn">RETRY RUN [PRESS R]</button>
-      </div>
-    </div>
-
-    <!-- Sector Selection Modal -->
-    <div id="sector-select-modal" class="failure-modal sector-select-modal hidden">
-      <div class="modal-card sector-modal-card">
-        <div class="modal-glitch-badge">CELESTIAL GAUNTLETS</div>
-        <h1 class="modal-headline cyan-glow">CHOOSE FLIGHT SECTOR</h1>
-        <p class="modal-quote">Select navigational gauntlet corridor to test momentum intuition:</p>
-        <div class="sector-card-list">
-          <div class="sector-choice-card active" data-sector="1">
-            <div class="sector-choice-badge">SECTOR 1</div>
-            <div class="sector-choice-title">PERSEUS SHALLOWS</div>
-            <div class="sector-choice-info">1.2 km Corridor • 5 Slalom Gates • Par 38s</div>
-            <div class="sector-choice-desc">Calibrated testing grounds with spaced asteroid debris and cyan jump portal.</div>
-          </div>
-          <div class="sector-choice-card" data-sector="2">
-            <div class="sector-choice-badge amber-badge">SECTOR 2</div>
-            <div class="sector-choice-title">KEPLER GRAVEYARD</div>
-            <div class="sector-choice-info">1.5 km Corridor • 7 Slalom Gates • Par 48s</div>
-            <div class="sector-choice-desc">Dense orbital debris from shattered Kepler solar arrays. Solar amber jump portal.</div>
-          </div>
-          <div class="sector-choice-card" data-sector="3">
-            <div class="sector-choice-badge purple-badge">SECTOR 3</div>
-            <div class="sector-choice-title">TARTARUS BELT</div>
-            <div class="sector-choice-info">1.8 km Corridor • 9 Slalom Gates • Par 56s</div>
-            <div class="sector-choice-desc">Claustrophobic iron-nickel asteroid cluster. High APM evasion and magenta jump portal.</div>
-          </div>
-        </div>
-        <button id="btn-close-sector-modal" class="modal-restart-btn">RETURN TO COCKPIT</button>
-      </div>
-    </div>
-
-    <!-- Center Crosshair / Orbit Ring Guide -->
-    <div class="center-crosshair">
-      <div class="crosshair-ring"></div>
-      <div class="crosshair-dot"></div>
-    </div>
-
-    <!-- Bottom Controls & Key Prompts -->
-    <footer class="hud-panel controls-panel">
-      <div class="key-hints">
-        <div class="key-pill space-pill" id="key-space">
-          <kbd>SPACE</kbd>
-          <span id="key-space-label">CHARGE PUSH (LAUNCH)</span>
-        </div>
-        <div class="key-pill" id="key-a">
-          <kbd>A</kbd>
-          <span id="key-a-label">AIM LEFT / CCW SPIN</span>
-        </div>
-        <div class="key-pill release-pill" id="key-release">
-          <span class="pill-label">LET GO</span>
-          <span id="key-release-label">LAUNCH / KICK</span>
-        </div>
-        <div class="key-pill" id="key-d">
-          <kbd>D</kbd>
-          <span id="key-d-label">AIM RIGHT / CW SPIN</span>
-        </div>
-        <div class="key-pill toggle-pill" id="key-m">
-          <kbd>M</kbd>
-          <span>TOGGLE KICK MODEL</span>
-        </div>
-        <div class="key-pill reset-pill" id="key-r">
-          <kbd>R</kbd>
-          <span>RESTART RUN</span>
-        </div>
-      </div>
-      <div class="feel-tip">
-        <span class="icon">⚡</span>
-        <span id="feel-tip-text">Push-off to start. In flight: Hold <strong>A</strong> or <strong>D</strong> to spin mace, let go to whip away from debris!</span>
-      </div>
-    </footer>
 
     <!-- Side Tuning Drawer (Collapsible) -->
     <aside class="tuning-drawer" id="tuning-drawer">
@@ -497,6 +302,38 @@
           <input type="range" id="slider-plasma-heat" min="50" max="250" value="100" step="10">
         </div>
 
+        <div class="drawer-section-divider">STEP 8: COLOSSAL ASTEROIDS & KINETIC PUSH</div>
+
+        <div class="slider-group">
+          <label>Colossal Asteroid Scale: <span id="val-colossal-scale">1.0</span>x (Up to 35m)</label>
+          <input type="range" id="slider-colossal-scale" min="0.5" max="3.0" value="1.0" step="0.1">
+        </div>
+
+        <div class="slider-group">
+          <label>Outer Belt Width Radius: <span id="val-belt-radius">350</span> m</label>
+          <input type="range" id="slider-belt-radius" min="150" max="600" value="350" step="25">
+        </div>
+
+        <div class="slider-group">
+          <label>Incoming Asteroid Speed: <span id="val-incoming-speed">1600</span> cm/s (58 km/h)</label>
+          <input type="range" id="slider-incoming-speed" min="600" max="3200" value="1600" step="100">
+        </div>
+
+        <div class="slider-group">
+          <label>Max Kinetic Push Force: <span id="val-push-force">50</span> kN</label>
+          <input type="range" id="slider-push-force" min="10" max="100" value="50" step="5">
+        </div>
+
+        <div class="slider-group">
+          <label>Critical Danger Distance: <span id="val-crit-dist">18</span> m</label>
+          <input type="range" id="slider-crit-dist" min="8" max="35" value="18" step="1">
+        </div>
+
+        <div class="slider-group">
+          <label>Asteroid Overpower Ratio: <span id="val-overpower-ratio">1.35</span>x</label>
+          <input type="range" id="slider-overpower-ratio" min="0.5" max="3.0" value="1.35" step="0.05">
+        </div>
+
         <div class="button-row">
           <button id="btn-reset-feel" class="btn-secondary">RESET DEFAULTS</button>
           <button id="btn-toggle-blind-math" class="btn-primary">BLIND MATH: ON</button>
@@ -504,8 +341,215 @@
         </div>
       </div>
     </aside>
+    </div>
+
+    <!-- Cybernetic 3D Aiming Crosshair -->
+    <div id="aim-crosshair-3d" class="aim-crosshair-3d hidden">
+      <div class="crosshair-bracket left">[</div>
+      <div class="crosshair-dot-ring"></div>
+      <div class="crosshair-bracket right">]</div>
+    </div>
+
+    <!-- Cybernetic Kinetic Lock-On Target Telemetry HUD -->
+    <div id="kinetic-target-reticle" class="kinetic-target-reticle hidden">
+      <div class="reticle-box">
+        <div class="reticle-corner tl"></div>
+        <div class="reticle-corner tr"></div>
+        <div class="reticle-corner bl"></div>
+        <div class="reticle-corner br"></div>
+        <div class="reticle-rot-ring"></div>
+        <div class="reticle-center-marker"></div>
+      </div>
+      <div class="target-line hud-label">
+        <span id="target-range">48m</span> &middot; <span id="target-tti">2.1s</span>
+        <span id="target-proximity-dilemma" class="target-too-close hidden">TOO CLOSE</span>
+      </div>
+    </div>
+
+    <!-- Game flow screens (Creator: "the interface doesnt look vary playagle and game like right now.") -->
+    <!-- Title -->
+    <div id="screen-title" class="screen-overlay hidden">
+      <div class="menu-column">
+        <h1 class="menu-logo">SPACEMENTUM</h1>
+        <p class="menu-tagline">You can't brake and you can't turn.</p>
+        <div id="title-menu" class="menu-list">
+          <button class="menu-item" data-action="play">PLAY<span id="title-best" class="menu-item-sub">&nbsp;</span></button>
+          <button class="menu-item" data-action="sector">SECTOR<span id="title-sector-val" class="menu-item-val">Perseus Shallows</span></button>
+          <button class="menu-item" data-action="mode">MODE<span id="title-mode-val" class="menu-item-val">CORRIDOR</span></button>
+          <button class="menu-item" data-action="howto">HOW TO PLAY</button>
+          <button class="menu-item" data-action="settings">SETTINGS</button>
+        </div>
+        <div class="menu-footer hud-label">&#8593; &#8595; select &middot; enter confirm</div>
+      </div>
+    </div>
+
+    <!-- Pause -->
+    <div id="screen-pause" class="screen-overlay hidden">
+      <div class="menu-column">
+        <h2 class="menu-heading">PAUSED</h2>
+        <div id="pause-menu" class="menu-list">
+          <button class="menu-item" data-action="resume">RESUME<span class="menu-item-key">ESC</span></button>
+          <button class="menu-item" data-action="restart">RESTART<span class="menu-item-key">R</span></button>
+          <button class="menu-item" data-action="settings">SETTINGS</button>
+          <button class="menu-item" data-action="quit">QUIT TO TITLE</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- How to Play -->
+    <div id="screen-howto" class="screen-overlay screen-sub hidden">
+      <div class="menu-column menu-column-wide">
+        <h2 class="menu-heading">HOW TO PLAY</h2>
+        <div class="howto-section hud-label">Corridor</div>
+        <div class="howto-row"><span class="howto-keys"><kbd>A</kbd><kbd>D</kbd></span><span>Spin the mace. Spinning is your only engine &mdash; and the only way to steer.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>SPACE</kbd></span><span>At launch, hold to charge your push-off and release to fly. Aim with A / D first.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>RELEASE</kbd></span><span>Let go of A / D to kick sideways. The mace strikes rocks and flings you the other way.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>&#9678;</kbd></span><span>Reach the jump portal. Clean gates and mace strikes score. Hit a rock and the run is over.</span></div>
+        <div class="howto-section hud-label">Colossal Belt</div>
+        <div class="howto-row"><span class="howto-keys"><kbd>MOUSE</kbd></span><span>Giant asteroids come at you from all sides. Move the cursor to aim at one.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>CLICK</kbd><kbd>F</kbd></span><span>Lock onto the asteroid under the cursor.</span></div>
+        <div class="howto-row"><span class="howto-keys"><kbd>SPACE</kbd></span><span>Hold to charge a push, release to blast it away. Inside 18 m a weak push fails and the asteroid pushes you instead.</span></div>
+        <div class="menu-list">
+          <button class="menu-item" data-action="back">BACK<span class="menu-item-key">ESC</span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div id="screen-settings" class="screen-overlay screen-sub hidden">
+      <div class="menu-column">
+        <h2 class="menu-heading">SETTINGS</h2>
+        <div class="setting-row">
+          <label class="hud-label" for="set-master">Master volume <span id="set-master-val">100</span>%</label>
+          <input type="range" id="set-master" min="0" max="100" value="100" step="5">
+        </div>
+        <div class="setting-row">
+          <label class="hud-label" for="set-hum">Engine hum <span id="set-hum-val">45</span>%</label>
+          <input type="range" id="set-hum" min="0" max="100" value="45" step="5">
+        </div>
+        <div class="setting-row">
+          <label class="hud-label" for="set-prox">Proximity alarm <span id="set-prox-val">75</span>%</label>
+          <input type="range" id="set-prox" min="0" max="100" value="75" step="5">
+        </div>
+        <div class="menu-list">
+          <button class="menu-item" data-action="back">BACK<span class="menu-item-key">ESC</span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results screens (Creator: "only the information needed"): victory / void / crash -->
+    <!-- Victory: Sector Jump Portal Breached -->
+    <div id="sector-completed-modal" class="failure-modal victory-modal results-modal hidden">
+      <div class="modal-card victory-card results-card">
+        <div class="grade-container">
+          <div class="grade-circle grade-s" id="victory-grade-circle">
+            <span id="victory-grade-letter">S</span>
+          </div>
+          <div id="victory-grade-title" class="grade-title">ORBITAL MAESTRO</div>
+          <span id="leaderboard-pb-tag" class="pb-tag hud-label hidden">&#9733; NEW BEST</span>
+        </div>
+
+        <div class="results-stats">
+          <div class="results-stat"><span class="hud-label">Time</span><span id="victory-time-val" class="results-stat-val">34.2s (Par 38.0s)</span></div>
+          <div class="results-stat"><span class="hud-label">Score</span><span id="victory-score-val" class="results-stat-val">14,850</span></div>
+          <div class="results-stat"><span class="hud-label">Gates</span><span id="victory-gates-val" class="results-stat-val">5 / 5</span></div>
+        </div>
+
+        <div class="modal-leaderboard-section">
+          <div class="leaderboard-table-container">
+            <table class="leaderboard-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>SCORE</th>
+                  <th>GRADE</th>
+                  <th>TIME</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboard-tbody">
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="menu-list">
+          <button id="btn-next-sector" class="menu-item" data-action="next">NEXT SECTOR</button>
+          <button id="btn-restart-victory" class="menu-item" data-action="retry">RETRY<span class="menu-item-key">R</span></button>
+          <button class="menu-item" data-action="menu">MENU</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Failure 1: Lost to the Void -->
+    <div id="void-doom-modal" class="failure-modal void-modal results-modal hidden">
+      <div class="modal-card results-card">
+        <h1 class="modal-headline void-glow">LOST TO THE VOID</h1>
+        <p class="results-line">Nothing left in reach.</p>
+        <div class="results-stats">
+          <div class="results-stat"><span class="hud-label">Distance</span><span id="void-dist-val" class="results-stat-val">0 m</span></div>
+          <div class="results-stat"><span class="hud-label">Score</span><span id="void-score-val" class="results-stat-val">0</span></div>
+          <div class="results-stat"><span class="hud-label">Best</span><span id="void-best-val" class="results-stat-val">&mdash;</span></div>
+        </div>
+        <div class="menu-list">
+          <button id="btn-restart-void" class="menu-item" data-action="retry">RETRY<span class="menu-item-key">R</span></button>
+          <button class="menu-item" data-action="menu">MENU</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Failure 2: Kinetic Impact Crash -->
+    <div id="crash-modal" class="failure-modal crash-modal results-modal hidden">
+      <div class="modal-card results-card">
+        <h1 class="modal-headline crash-glow">IMPACT</h1>
+        <p class="results-line">Hit <span id="crash-obstacle-val">an asteroid</span> at <span id="crash-speed-val">109 km/h</span></p>
+        <div class="results-stats">
+          <div class="results-stat"><span class="hud-label">Distance</span><span id="crash-dist-val" class="results-stat-val">0 m</span></div>
+          <div class="results-stat"><span class="hud-label">Score</span><span id="crash-score-val" class="results-stat-val">0</span></div>
+          <div class="results-stat"><span class="hud-label">Best</span><span id="crash-best-val" class="results-stat-val">&mdash;</span></div>
+        </div>
+        <div class="menu-list">
+          <button id="btn-restart-crash" class="menu-item" data-action="retry">RETRY<span class="menu-item-key">R</span></button>
+          <button class="menu-item" data-action="menu">MENU</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sector Selection Modal -->
+    <div id="sector-select-modal" class="failure-modal sector-select-modal hidden">
+      <div class="modal-card sector-modal-card">
+        <h2 class="menu-heading">SECTOR</h2>
+        <div class="sector-card-list">
+          <div class="sector-choice-card active" data-sector="1">
+            <div class="sector-choice-badge">SECTOR 1</div>
+            <div class="sector-choice-title">PERSEUS SHALLOWS</div>
+            <div class="sector-choice-info">1.2 km Corridor • 5 Slalom Gates • Par 38s</div>
+            <div class="sector-choice-desc">Calibrated testing grounds with spaced asteroid debris and cyan jump portal.</div>
+          </div>
+          <div class="sector-choice-card" data-sector="2">
+            <div class="sector-choice-badge amber-badge">SECTOR 2</div>
+            <div class="sector-choice-title">KEPLER GRAVEYARD</div>
+            <div class="sector-choice-info">1.5 km Corridor • 7 Slalom Gates • Par 48s</div>
+            <div class="sector-choice-desc">Dense orbital debris from shattered Kepler solar arrays. Solar amber jump portal.</div>
+          </div>
+          <div class="sector-choice-card" data-sector="3">
+            <div class="sector-choice-badge purple-badge">SECTOR 3</div>
+            <div class="sector-choice-title">TARTARUS BELT</div>
+            <div class="sector-choice-info">1.8 km Corridor • 9 Slalom Gates • Par 56s</div>
+            <div class="sector-choice-desc">Claustrophobic iron-nickel asteroid cluster. High APM evasion and magenta jump portal.</div>
+          </div>
+        </div>
+        <button id="btn-close-sector-modal" class="modal-restart-btn">BACK</button>
+      </div>
+    </div>
+
+    <!-- Center Crosshair / Orbit Ring Guide -->
+    <div class="center-crosshair">
+      <div class="crosshair-dot"></div>
+    </div>
+
+
   </div>
 
-  <script src="app.js?v=5.1"></script>
+  <script src="app.js?v=9.0"></script>
 </body>
 </html>

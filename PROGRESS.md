@@ -168,6 +168,16 @@
 - [x] `Content/Characters/Astronaut/` & `Content/Weapons/Mace/`: Created Git LFS directory roots for high-fidelity meshes and textures.
 - [x] `Tools/CoreFeelPrototype/`: Complete 3D interactive web companion mirror upgraded with PBR visual details, backpack RCS thruster plumes, chrome hydraulic arm pistons, continuous Web Audio engine hum drone, spatial proximity radar alert with cadence scaling, portal vacuum collapse sound, and standalone distribution runner (`package.json`, `package-dist.js`, `dist/`).
 
+### Minimal Game HUD & Playable Game Flow Checklist (Core Feel Prototype, phase 8 — Polish + ship) ✅
+> **Creator's request (verbatim):** *"make the game screen minimalistic with only the information needed. the interface doesnt look vary playagle and game like right now."*
+
+- [x] Removed dead CSS from phases 2–7 (old banners, key pills, proximity widget, modal quote/diagnostics/glitch badge, launch card, radar legend, unused keyframes); `.modal-restart-btn`, cockpit panel and `.kinetic-card` kept (still used).
+- [x] No phase 7 test hook present in `app.js` (it was injected externally); nothing to remove.
+- [x] Style pass: `prefers-reduced-motion`, 4K scaling block, headless 1280×720 + 3840×2160 checks (no text <10px, no overlap, no console errors).
+- [x] Colossal overpower path verified (`OVERPOWERED!` rose toast + knock-back).
+- [x] `node -c app.js` OK; `?v=9.0`; `package.json` 0.8.0; `npm run package:web` → `dist/` identical to source.
+- [x] Acceptance checklist in `Docs/PLAN_MinimalGameHUD.md` §7 ticked except the same-score regression item (not A/B tested).
+
 ---
 
 ## Roadmap
@@ -196,8 +206,4 @@
 | 2026-10-14 | Step 5 VFX, Dynamic Audio & Flight Camera Rig | Implemented `USpaceFlightCameraComponent` (dynamic FOV $80^\circ \to 105^\circ$, Dutch roll banking, kinetic trauma shake), `USpaceFlightVFXComponent` (Niagara speed-reactive ribbons, hyperspace velocity dust streaks, impact spark bursts), `USpaceProceduralFlightAudioComponent` (continuous spin pitch modulation, 45Hz sub-bass launch thump, whiplash snap), authored `GenerateStep5VFXAndAudioAssets.py` for UE editor, updated 3D companion testbed with Step 5 feel knobs, verified in browser. |
 | 2026-10-15 | Step 6 Sector Progression, Milestones & Leaderboards | Implemented UE 5.8 `USpaceSectorProgressionSubsystem`, `USpaceMentumSaveGame`, `ASpaceSectorExitPortalActor`, `ASpaceMilestoneGateActor`, `FSectorFlightScore` composite scoring formula, `EKineticFlightGrade` evaluation ($S+, S, A, B, C$), and editor asset generation script `GenerateStep6ProgressionAssets.py`. Fully mirrored in companion web prototype with 3 distinct sectors, milestone arches, jump portal event horizon breach, victory debrief modal, and localStorage pilot profile persistence. |
 | 2026-10-15 | Step 7 High-Fidelity Asset Pipeline, Audio/Visual Polish & Packaging | Implemented UE 5.8 mechanical arm rigging & mace physics constraint component, live PBR dynamic material instances, data-driven material palette (`USpaceMaterialPaletteDataAsset`), procedural engine hum drone, proximity radar audio alert with distance cadence scaling (< 25m), portal vacuum collapse sound, Win64 packaging pipeline (`PackageSpaceMentumWin64.ps1/.bat`), offline asset validation suite (49/49 passed), and interactive 3D web companion mirror with standalone distribution build (`dist/`). |
-
-
-
-
-
+| 2026-10-21 | Minimal Game HUD — phase 8 Polish + ship | Creator request: *"make the game screen minimalistic with only the information needed. the interface doesnt look vary playagle and game like right now."* Removed dead CSS, added reduced-motion + 4K HUD scaling, verified 720p/4K and the Colossal overpower toast headlessly, bumped cache-bust to `?v=9.0` and package to 0.8.0, synced `dist/`. See `Docs/PLAN_MinimalGameHUD.md` §6.1/§7. |

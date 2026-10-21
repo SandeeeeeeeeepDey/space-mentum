@@ -68,6 +68,17 @@
     ProximityAlarmVolume: 0.75,
     ProximityDistanceThresholdCm: 2500.0,
     PlasmaHeatMultiplier: 1.0,
+
+    // Step 8: Colossal Asteroids, Wide Belt & Kinetic Push Manipulation (§Creator Mandate)
+    ActiveScreenMode: 'Gauntlet', // 'Gauntlet' (Slalom Corridor) or 'ColossalBelt' (Monumental Asteroids & Wide Belt)
+    KineticMode: 'Push', // 'Push' (Repulsion) or 'Pull' (Attraction - Next Phase)
+    ColossalAsteroidScale: 1.0,
+    OuterBeltRadiusCm: 35000.0, // 350 meters wide outside view
+    IncomingAsteroidSpeedCmPerSec: 1600.0,
+    MaxPushForceKiloNewtons: 50.0,
+    CriticalDangerDistanceCm: 1800.0, // 18m danger threshold
+    OverpowerRatio: 1.35,
+    KineticChargeRatePerSec: 0.95,
   };
 
   // --- Multi-Sector Celestial Catalog (Step 6) ---
@@ -277,6 +288,35 @@
     // Rule 4 "Blind Math" Policy: Defaults to TRUE (no predictive trajectory arcs)
     bBlindMath: true,
     bShowGizmos: false,
+
+    // Step 8: Kinetic Aiming, Locking & Push State
+    KineticTarget: null,
+    CandidateTarget: null,
+    KineticLockStatus: 'NoTarget',
+    KineticPushCharge: 0.0,
+    bIsChargingKineticPush: false,
+    AimScreenCoords: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+    AimNormalized: { x: 0, y: 0 },
+    AimDirectionWorld: new THREE.Vector3(1, 0, 0),
+  };
+
+  // --- Held Input Flags ---
+  const Input = {
+    isAPressed: false,
+    isDPressed: false,
+    isSpacePressed: false,
+    lastAPressTime: 0,
+    lastDPressTime: 0,
+  };
+
+  // --- Game Flow / UI State (separate from State.RunPhase physics phases) ---
+  const UI = {
+    screen: 'playing', // 'title' | 'playing' | 'paused' | 'results'
+    sub: null, // open sub-screen over title/pause: 'howto' | 'settings' | 'sector'
+    devOpen: false,
+    audioDucked: false,
+    menuIndex: 0,
+    title: { sector: 1, mode: 'Gauntlet' }, // selections made on the title screen
   };
 
   // --- Dynamic Slalom Gates (Populated by loadSector) ---
@@ -297,12 +337,25 @@
       if (AudioContextClass) {
         audioCtx = new AudioContextClass();
         setupContinuousSpinSynth();
+        applyAudioDuck();
       }
     }
     if (audioCtx && audioCtx.state === 'suspended') {
       audioCtx.resume();
     }
     return audioCtx;
+  }
+
+  // Pause / menus: silence the continuous loops (the sim that retargets them is frozen meanwhile)
+  function applyAudioDuck() {
+    if (!audioCtx || !continuousSpinGain || !continuousReactorHumGain) return;
+    const t = audioCtx.currentTime;
+    if (UI.audioDucked) {
+      continuousSpinGain.gain.setTargetAtTime(0.0001, t, 0.05);
+      continuousReactorHumGain.gain.setTargetAtTime(0.0001, t, 0.05);
+    } else {
+      continuousReactorHumGain.gain.setTargetAtTime(0.035 * Tuning.EngineHumVolume * Tuning.AudioMasterVolume, t, 0.1);
+    }
   }
 
   function setupContinuousSpinSynth() {
@@ -390,47 +443,26 @@
     pingOsc.stop(now + 0.055);
   }
 
-  function updateProximityRadarAlarm(minDistCm, nowSeconds) {
+  function updateProximityRadarAlarm(minDistCm, nowSeconds, nearestPos) {
     const thresholdCm = Tuning.ProximityDistanceThresholdCm;
-    const proxWidget = document.getElementById('proximity-warning-widget');
-    const proxStatus = document.getElementById('prox-status-text');
-    const proxDist = document.getElementById('prox-distance-text');
-    const proxMeter = document.getElementById('prox-meter-bar');
 
     if (minDistCm <= thresholdCm && State.RunPhase === 'Running') {
       const threatRatio = Math.max(0.0, Math.min(1.0, 1.0 - (minDistCm / thresholdCm)));
       State.ProximityAlarm.bIsActive = true;
       State.ProximityAlarm.threatRatio = threatRatio;
       State.ProximityAlarm.distanceCm = minDistCm;
+      State.ProximityAlarm.nearestPos = nearestPos || null;
 
       const pingInterval = 1.0 - (threatRatio * 0.92);
       if (nowSeconds - lastProximityPingTime >= pingInterval) {
         lastProximityPingTime = nowSeconds;
         playProximityRadarPing(threatRatio);
       }
-
-      if (proxWidget) {
-        if (threatRatio > 0.65) {
-          proxWidget.className = 'proximity-warning-widget danger';
-          if (proxStatus) proxStatus.textContent = 'COLLISION IMMINENT!';
-        } else {
-          proxWidget.className = 'proximity-warning-widget warning';
-          if (proxStatus) proxStatus.textContent = 'HAZARD PROXIMITY!';
-        }
-        if (proxDist) proxDist.textContent = (minDistCm * 0.01).toFixed(1) + 'm';
-        if (proxMeter) proxMeter.style.width = (threatRatio * 100).toFixed(0) + '%';
-      }
     } else {
       State.ProximityAlarm.bIsActive = false;
       State.ProximityAlarm.threatRatio = 0.0;
       State.ProximityAlarm.distanceCm = minDistCm;
-
-      if (proxWidget) {
-        proxWidget.className = 'proximity-warning-widget safe';
-        if (proxStatus) proxStatus.textContent = 'PROXIMITY: CLEAR';
-        if (proxDist) proxDist.textContent = '> ' + (thresholdCm * 0.01).toFixed(0) + 'm';
-        if (proxMeter) proxMeter.style.width = '0%';
-      }
+      State.ProximityAlarm.nearestPos = null;
     }
   }
 
@@ -491,6 +523,106 @@
     gain.connect(ctx.destination);
     osc.start(now);
     osc.stop(now + 0.08);
+  }
+
+  // --- Step 8: Kinetic Manipulator Web Audio Synthesis ---
+  function playKineticChargeSound(ratio) {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+
+    const freq = 180 + ratio * 720;
+    osc.frequency.setValueAtTime(freq, now);
+    osc.frequency.exponentialRampToValueAtTime(freq + 40, now + 0.06);
+
+    gain.gain.setValueAtTime((0.05 + ratio * 0.18) * Tuning.AudioMasterVolume, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.06);
+  }
+
+  function playTargetLockBeep(isCritical) {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    const freqs = isCritical ? [440, 220, 110] : [780, 1180];
+    freqs.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = isCritical ? 'sawtooth' : 'sine';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.05);
+      gain.gain.setValueAtTime((isCritical ? 0.35 : 0.22) * Tuning.AudioMasterVolume, now + idx * 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.05 + 0.08);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + idx * 0.05);
+      osc.stop(now + idx * 0.05 + 0.08);
+    });
+  }
+
+  function playKineticPushBlastSound(forceKN) {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    // 1. Deep sub-bass repulsion thump (38Hz -> 18Hz)
+    const subOsc = ctx.createOscillator();
+    const subGain = ctx.createGain();
+    subOsc.type = 'sine';
+    subOsc.frequency.setValueAtTime(80, now);
+    subOsc.frequency.exponentialRampToValueAtTime(22, now + 0.45);
+    subGain.gain.setValueAtTime(0.95 * Tuning.AudioMasterVolume, now);
+    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+    subOsc.connect(subGain);
+    subGain.connect(ctx.destination);
+    subOsc.start(now);
+    subOsc.stop(now + 0.5);
+
+    // 2. High-energy plasma crackle burst
+    const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < noiseBuffer.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.08));
+    }
+    const noise = ctx.createBufferSource();
+    noise.buffer = noiseBuffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.setValueAtTime(800, now);
+    const nGain = ctx.createGain();
+    nGain.gain.setValueAtTime(0.65 * Tuning.AudioMasterVolume, now);
+    nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+    noise.connect(filter);
+    filter.connect(nGain);
+    nGain.connect(ctx.destination);
+    noise.start(now);
+  }
+
+  function playAsteroidOverpoweredSound() {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    // Concussive crushing impact sound
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(110, now);
+    osc.frequency.exponentialRampToValueAtTime(18, now + 0.6);
+    gain.gain.setValueAtTime(1.0 * Tuning.AudioMasterVolume, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.65);
   }
 
   function playLaunchExplosionThump() {
@@ -652,6 +784,24 @@
     });
   }
 
+  function playGrazeWarning() {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.exponentialRampToValueAtTime(110, now + 0.22);
+    gain.gain.setValueAtTime(0.14 * Tuning.AudioMasterVolume, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.25);
+  }
+
   function playMilestoneChime() {
     const ctx = getAudioContext();
     if (!ctx) return;
@@ -808,22 +958,28 @@
     State.CameraTrauma = Math.min(1.0, State.CameraTrauma + 0.45);
   }
 
-  function triggerStrikeFlash(obstacle, deltaV, u) {
-    const banner = document.getElementById('strike-banner');
-    const titleEl = document.querySelector('.strike-title');
-    const detailEl = document.getElementById('strike-detail');
-    if (banner && detailEl) {
-      const defMag = deltaV.length().toFixed(0);
-      if (titleEl) {
-        titleEl.textContent = u > 0.65 ? 'MACE IMPACT DEFLECTION!' : 'MECHANICAL ARM PUSH!';
-      }
-      detailEl.textContent = `Pushed +${defMag} cm/s off ${obstacle.name || 'Asteroid'}! Trajectory shifted.`;
-      banner.classList.remove('hidden');
+  // --- Toasts: short floating event text (Creator: minimal HUD, only what the player needs) ---
+  const TOAST_MAX_VISIBLE = 3;
 
-      setTimeout(() => {
-        banner.classList.add('hidden');
-      }, 2400);
-    }
+  function showToast(text, variant) {
+    const layer = document.getElementById('toast-layer');
+    if (!layer) return;
+    while (layer.children.length >= TOAST_MAX_VISIBLE) layer.removeChild(layer.firstChild);
+    const el = document.createElement('div');
+    el.className = `toast ${variant || 'cyan'}`;
+    el.textContent = text;
+    layer.appendChild(el);
+    el.addEventListener('animationend', () => el.remove());
+    setTimeout(() => el.remove(), 1100); // fallback if animations are disabled
+  }
+
+  function clearToasts() {
+    const layer = document.getElementById('toast-layer');
+    if (layer) layer.innerHTML = '';
+  }
+
+  function triggerStrikeFlash() {
+    showToast('STRIKE', 'gold');
 
     const container = document.getElementById('canvas-container');
     if (container) {
@@ -839,14 +995,8 @@
 
     playVoidDoomSound();
 
-    const modal = document.getElementById('void-doom-modal');
-    const horizonEl = document.getElementById('doom-horizon-val');
-    if (horizonEl) {
-      horizonEl.textContent = `${snapshot.lookaheadHorizon.toFixed(1)} SECONDS`;
-    }
-    if (modal) {
-      modal.classList.remove('hidden');
-    }
+    fillRunStats('void');
+    showResults('void-doom-modal');
   }
 
   function triggerKineticCrash(obstacle, impactSpeed) {
@@ -856,14 +1006,12 @@
     playCrashSound();
     State.CameraTrauma = 1.0;
 
-    const modal = document.getElementById('crash-modal');
     const speedEl = document.getElementById('crash-speed-val');
-    if (speedEl) {
-      speedEl.textContent = `${impactSpeed.toFixed(0)} cm/s (${(impactSpeed * 0.036).toFixed(1)} km/h)`;
-    }
-    if (modal) {
-      modal.classList.remove('hidden');
-    }
+    if (speedEl) speedEl.textContent = `${Math.round(impactSpeed * 0.036)} km/h`;
+    const obstacleEl = document.getElementById('crash-obstacle-val');
+    if (obstacleEl) obstacleEl.textContent = (obstacle && obstacle.name) || 'an asteroid';
+    fillRunStats('crash');
+    showResults('crash-modal');
   }
 
   // --- Launch Push-Off Initiation & Departure (§1.4) ---
@@ -904,11 +1052,62 @@
     State.TargetFOV = Math.min(106.0, 80.0 + finalCharge * 18.0);
     State.CameraTrauma = finalCharge * 0.45;
 
+    countHintRun();
     const banner = document.getElementById('launch-guidance-banner');
-    if (banner) banner.classList.add('hidden');
+    if (banner) {
+      banner.classList.add('fade-out');
+      setTimeout(() => {
+        if (State.RunPhase !== 'LaunchPushOff') banner.classList.add('hidden');
+      }, 300);
+    }
   }
 
   function restartRun() {
+    showScreen('playing');
+    if (Tuning.ActiveScreenMode === 'ColossalBelt') {
+      State.RunPhase = 'Running';
+      State.CoMPosition.x = 0.0; State.CoMPosition.y = 0.0; State.CoMPosition.z = 0.0;
+      State.CoMVelocity.x = 400.0; State.CoMVelocity.y = 0.0; State.CoMVelocity.z = 0.0;
+      State.LateralVelocity.y = 0.0; State.LateralVelocity.z = 0.0;
+      State.AngularVelocityRadPerSec = 0.0;
+      State.OrbitAngleRad = 0.0;
+      State.HeldSpinDirection = 'None';
+      State.StrikeCount = 0;
+      State.ActiveFlightTimeSeconds = 0.0;
+      State.KineticPushCharge = 0.0;
+      State.bIsChargingKineticPush = false;
+      unlockKineticTarget();
+      clearToasts();
+      State.ProximityAlarm.threatRatio = 0.0;
+      State.ProximityAlarm.nearestPos = null;
+
+      const banner = document.getElementById('launch-guidance-banner');
+      if (banner) banner.classList.add('hidden');
+      countHintRun();
+
+      const voidModal = document.getElementById('void-doom-modal');
+      if (voidModal) voidModal.classList.add('hidden');
+      const crashModal = document.getElementById('crash-modal');
+      if (crashModal) crashModal.classList.add('hidden');
+      const victoryModal = document.getElementById('sector-completed-modal');
+      if (victoryModal) victoryModal.classList.add('hidden');
+
+      if (colossalBeltGroup) {
+        colossalIncomingAsteroids.forEach(ast => {
+          colossalBeltGroup.remove(ast.mesh);
+          if (ast.mesh.geometry) ast.mesh.geometry.dispose();
+          if (ast.mesh.material) ast.mesh.material.dispose();
+        });
+      }
+      colossalIncomingAsteroids = [];
+      for (let i = 0; i < 5; i++) {
+        spawnIncomingColossalAsteroid(4500 + i * 2800);
+      }
+
+      updateHUD();
+      return;
+    }
+
     State.RunPhase = 'LaunchPushOff';
     State.LaunchAimAngleDeg = 0.0;
     State.LaunchPushCharge = 0.0;
@@ -944,7 +1143,7 @@
 
     // Show launch banner
     const banner = document.getElementById('launch-guidance-banner');
-    if (banner) banner.classList.remove('hidden');
+    if (banner) banner.classList.remove('hidden', 'fade-out');
 
     // Hide modals and banners
     const voidModal = document.getElementById('void-doom-modal');
@@ -955,12 +1154,10 @@
     if (victoryModal) victoryModal.classList.add('hidden');
     const sectorModal = document.getElementById('sector-select-modal');
     if (sectorModal) sectorModal.classList.add('hidden');
-    const strikeBanner = document.getElementById('strike-banner');
-    if (strikeBanner) strikeBanner.classList.add('hidden');
-    const slalomBanner = document.getElementById('slalom-banner');
-    if (slalomBanner) slalomBanner.classList.add('hidden');
-    const milestoneBanner = document.getElementById('milestone-banner');
-    if (milestoneBanner) milestoneBanner.classList.add('hidden');
+    clearToasts();
+    State.ProximityAlarm.bIsActive = false;
+    State.ProximityAlarm.threatRatio = 0.0;
+    State.ProximityAlarm.nearestPos = null;
 
     // Reset slalom gates
     for (const target of SlalomTargets) {
@@ -1016,6 +1213,12 @@
     }
 
     if (State.RunPhase !== 'Running') return;
+
+    // Step 8: Kinetic Push Charging Accumulator
+    if (State.bIsChargingKineticPush) {
+      State.KineticPushCharge = Math.min(1.0, State.KineticPushCharge + dt * Tuning.KineticChargeRatePerSec);
+      playKineticChargeSound(State.KineticPushCharge);
+    }
 
     const accelRad = Tuning.SpinAccelerationDegPerSec2 * (Math.PI / 180);
     const maxSpeedRad = Tuning.MaxAngularSpeedDegPerSec * (Math.PI / 180);
@@ -1085,6 +1288,7 @@
 
     // 7.5. Step 7 Proximity Radar Alarm & Engine Hum Audio
     let minObsDistCm = 999999.0;
+    let nearestObsPos = null;
     for (const obs of denseObstacles) {
       if (obs.destroyed) continue;
       const dx = obs.position.x - State.CoMPosition.x;
@@ -1096,9 +1300,10 @@
       ) - obs.radius;
       if (dist < minObsDistCm) {
         minObsDistCm = Math.max(0, dist);
+        nearestObsPos = obs.position;
       }
     }
-    updateProximityRadarAlarm(minObsDistCm, performance.now() / 1000.0);
+    updateProximityRadarAlarm(minObsDistCm, performance.now() / 1000.0, nearestObsPos);
     updateContinuousEngineHumAudio(State.CoMVelocity.x, Math.hypot(State.LateralVelocity.y, State.LateralVelocity.z));
 
     // 8. Slalom Gate Evasions
@@ -1142,7 +1347,8 @@
     doomCheckAccumulator += dt;
     if (doomCheckAccumulator >= 0.12) {
       doomCheckAccumulator = 0;
-      evaluateBackgroundDoomLookahead();
+      // Colossal Belt has no corridor anchors to look ahead at; the doom verdict is corridor-only
+      if (Tuning.ActiveScreenMode !== 'ColossalBelt') evaluateBackgroundDoomLookahead();
     }
 
     // 13. Dynamic Camera FOV Shifter
@@ -1251,28 +1457,13 @@
     }
   }
 
-  function showSlalomBanner(isSuccess, target, clearance) {
-    const banner = document.getElementById('slalom-banner');
-    const icon = document.getElementById('slalom-icon');
-    const title = document.getElementById('slalom-title');
-    const detail = document.getElementById('slalom-detail');
+  const CLEAN_GATE_POINTS = 500; // mirrors the (CleanGatesCleared * 500) term of the score formula
 
-    if (banner && title && detail) {
-      if (isSuccess) {
-        banner.className = 'slalom-banner success';
-        icon.textContent = '✓';
-        const streakText = State.CleanEvasionStreak > 1 ? ` (STREAK ${State.CleanEvasionStreak}x!)` : '';
-        title.textContent = `CLEAN EVASION!${streakText}`;
-        detail.textContent = `${target.name} Cleared: +${clearance.toFixed(0)} cm clearance!`;
-      } else {
-        banner.className = 'slalom-banner graze';
-        icon.textContent = '⚠';
-        title.textContent = 'GRAZED BOUNDARY!';
-        detail.textContent = `${target.name} Missed by ${clearance.toFixed(0)} cm! Streak reset.`;
-      }
-
-      banner.classList.remove('hidden');
-      setTimeout(() => { banner.classList.add('hidden'); }, 2200);
+  function showSlalomBanner(isSuccess) {
+    if (isSuccess) {
+      showToast(`CLEAN +${CLEAN_GATE_POINTS}`, 'cyan');
+    } else {
+      showToast('MISSED GATE', 'rose');
     }
   }
 
@@ -1293,15 +1484,7 @@
   }
 
   function showMilestoneBanner(title, bonus) {
-    const banner = document.getElementById('milestone-banner');
-    const titleEl = document.getElementById('milestone-title');
-    const detailEl = document.getElementById('milestone-detail');
-    if (banner && titleEl && detailEl) {
-      titleEl.textContent = 'CELESTIAL MILESTONE REACHED!';
-      detailEl.textContent = `${title} • +${bonus} PTS BONUS!`;
-      banner.classList.remove('hidden');
-      setTimeout(() => { banner.classList.add('hidden'); }, 2800);
-    }
+    showToast(`${title} +${bonus}`, 'gold');
   }
 
   // --- Step 6: Sector Run Victory & Jump Portal Completion ---
@@ -1381,33 +1564,21 @@
     const circle = document.getElementById('victory-grade-circle');
     const letter = document.getElementById('victory-grade-letter');
     const title = document.getElementById('victory-grade-title');
-    const desc = document.getElementById('victory-grade-desc');
 
-    if (circle && letter && title && desc) {
+    if (circle && letter && title) {
       circle.className = `grade-circle ${gradeClass}`;
       letter.textContent = grade;
       title.textContent = gradeTitle;
-      desc.textContent = gradeDesc;
     }
 
     const timeVal = document.getElementById('victory-time-val');
-    if (timeVal) timeVal.textContent = `${timeSec.toFixed(1)}s (Par: ${currentSector.parTimeSeconds.toFixed(1)}s)`;
-
-    const avgVal = document.getElementById('victory-avg-speed-val');
-    if (avgVal) avgVal.textContent = `${Math.round(avgSpeedCms)} cm/s (${(avgSpeedCms * 0.036).toFixed(1)} km/h)`;
-
-    const peakVal = document.getElementById('victory-peak-speed-val');
-    if (peakVal) peakVal.textContent = `${Math.round(peakSpeedCms)} cm/s (${(peakSpeedCms * 0.036).toFixed(1)} km/h)`;
+    if (timeVal) timeVal.textContent = `${timeSec.toFixed(1)}s (Par ${currentSector.parTimeSeconds.toFixed(1)}s)`;
 
     const gatesVal = document.getElementById('victory-gates-val');
-    const pct = SlalomTargets.length > 0 ? Math.round((State.CleanGatesCleared / SlalomTargets.length) * 100) : 100;
-    if (gatesVal) gatesVal.textContent = `${State.CleanGatesCleared} / ${SlalomTargets.length} (${pct}% CLEAN)`;
-
-    const strikesVal = document.getElementById('victory-strikes-val');
-    if (strikesVal) strikesVal.textContent = `${State.StrikeCount} LANDED (+${State.StrikeCount * 300} PTS)`;
+    if (gatesVal) gatesVal.textContent = `${State.CleanGatesCleared} / ${SlalomTargets.length}`;
 
     const scoreVal = document.getElementById('victory-score-val');
-    if (scoreVal) scoreVal.textContent = `${finalScore.toLocaleString()} PTS`;
+    if (scoreVal) scoreVal.textContent = finalScore.toLocaleString();
 
     const pbTag = document.getElementById('leaderboard-pb-tag');
     if (pbTag) pbTag.classList.toggle('hidden', !isNewPB);
@@ -1417,17 +1588,14 @@
     if (tbody) {
       tbody.innerHTML = '';
       const entries = profile.leaderboards[State.CurrentSectorIndex] || [];
-      entries.forEach((e, i) => {
+      entries.slice(0, 5).forEach((e, i) => {
         const tr = document.createElement('tr');
         if (i === 0) tr.className = 'rank-1';
         tr.innerHTML = `
           <td>${i + 1}</td>
-          <td>${e.callsign}</td>
           <td>${e.score.toLocaleString()}</td>
           <td><span class="badge ${e.grade.startsWith('S') ? 'badge-amber' : ''}">${e.grade}</span></td>
           <td>${e.time}</td>
-          <td>${e.speed}</td>
-          <td>${e.date}</td>
         `;
         tbody.appendChild(tr);
       });
@@ -1437,11 +1605,9 @@
     const nextBtn = document.getElementById('btn-next-sector');
     if (nextBtn) {
       if (State.CurrentSectorIndex < 3) {
-        nextBtn.textContent = `WARP TO SECTOR ${State.CurrentSectorIndex + 1} ❯`;
-        nextBtn.style.display = 'block';
+        nextBtn.textContent = 'NEXT SECTOR';
       } else {
-        nextBtn.textContent = 'ALL SECTORS MASTERED ★';
-        nextBtn.style.display = 'block';
+        nextBtn.textContent = 'BACK TO SECTOR 1';
       }
     }
 
@@ -1450,7 +1616,7 @@
     playPortalWarpFanfare();
     triggerWarpJumpFlash(currentSector.portalThemeColorStr);
 
-    if (modal) modal.classList.remove('hidden');
+    showResults('sector-completed-modal');
   }
 
   function triggerWarpJumpFlash(colorStr) {
@@ -1538,6 +1704,16 @@
   // Step 6: Multi-Sector Terminus Exit Jump Portal & Milestone Entities
   let exitPortalGroup = null, exitPortalTitaniumRing = null, exitPortalAccretionDisk = null, exitPortalEventHorizon = null, exitPortalLight = null;
   let milestoneGateGroups = [];
+
+  // Step 8: Colossal Asteroid Belt, Multi-Angle Hazards & Kinetic Flux Beam Entities
+  let colossalBeltGroup = null;
+  let colossalBackgroundAsteroids = [];
+  let colossalIncomingAsteroids = [];
+  let kineticFluxLine = null;
+  let kineticShockwaveMesh = null;
+  let aimRaycaster = new THREE.Raycaster();
+  let mouseNormalized = new THREE.Vector2(0, 0);
+  let colossalSpawnTimer = 0;
 
   function init3D() {
     const container = document.getElementById('canvas-container');
@@ -1799,11 +1975,40 @@
     trajectoryLine.visible = false;
     scene.add(trajectoryLine);
 
+    // Kinetic Flux Beam Linking Astronaut to Locked Asteroid
+    const fluxGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, 0)
+    ]);
+    const fluxMat = new THREE.LineBasicMaterial({
+      color: 0x00f0ff,
+      linewidth: 3.5,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending
+    });
+    kineticFluxLine = new THREE.Line(fluxGeo, fluxMat);
+    kineticFluxLine.visible = false;
+    scene.add(kineticFluxLine);
+
+    // Kinetic Repulsion Shockwave Visual Mesh
+    const shockwaveGeo = new THREE.TorusGeometry(80, 8, 16, 48);
+    const shockwaveMat = new THREE.MeshBasicMaterial({
+      color: 0x00f0ff,
+      transparent: true,
+      opacity: 0.0,
+      blending: THREE.AdditiveBlending
+    });
+    kineticShockwaveMesh = new THREE.Mesh(shockwaveGeo, shockwaveMat);
+    kineticShockwaveMesh.visible = false;
+    scene.add(kineticShockwaveMesh);
+
     // Environmental Generation & Sector 1 Initialization
     createStarfield();
     loadSector(1);
 
     window.addEventListener('resize', onWindowResize);
+    window.addEventListener('mousemove', onMouseMoveAim);
   }
 
   // --- Starting Asteroid Celestial Anchor (§1.4) ---
@@ -2121,6 +2326,532 @@
       exitPortalEventHorizon = null;
       exitPortalLight = null;
     }
+
+    // Remove colossal asteroid belt and incoming hazards
+    if (colossalBeltGroup) {
+      scene.remove(colossalBeltGroup);
+      colossalBeltGroup.traverse(child => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) child.material.dispose();
+      });
+      colossalBeltGroup = null;
+    }
+    colossalBackgroundAsteroids = [];
+    colossalIncomingAsteroids = [];
+    State.KineticTarget = null;
+    State.CandidateTarget = null;
+    State.KineticLockStatus = 'NoTarget';
+    if (kineticFluxLine) kineticFluxLine.visible = false;
+  }
+
+  // --- Step 8: Colossal Asteroids, Belt Vista & Kinetic Push Mechanics ---
+  const ColossalGreekLetters = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Zeta', 'Theta', 'Iota', 'Kappa', 'Lambda', 'Sigma', 'Omega', 'Titan', 'Ares', 'Gorgon'];
+  let colossalAsteroidSeq = 1;
+
+  function spawnIncomingColossalAsteroid(spawnForwardX) {
+    if (!colossalBeltGroup) return;
+
+    // Radius between 450cm and 1800cm (9m to 36m diameter), scaled by tuning knob
+    const baseRadius = (450 + Math.random() * 1350) * Tuning.ColossalAsteroidScale;
+    const geo = new THREE.IcosahedronGeometry(baseRadius, 1);
+
+    // Perturb vertices for rugged craggy asteroid shape
+    const posAttr = geo.attributes.position;
+    for (let i = 0; i < posAttr.count; i++) {
+      const vx = posAttr.getX(i);
+      const vy = posAttr.getY(i);
+      const vz = posAttr.getZ(i);
+      const perturb = 1.0 + (Math.random() - 0.5) * 0.28;
+      posAttr.setXYZ(i, vx * perturb, vy * perturb, vz * perturb);
+    }
+    geo.computeVertexNormals();
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      roughness: 0.85,
+      metalness: 0.25,
+      flatShading: true,
+    });
+
+    const mesh = new THREE.Mesh(geo, mat);
+
+    // Position: forward at spawnForwardX, radial offset in Y, Z
+    const offsetTheta = Math.random() * Math.PI * 2;
+    const offsetR = 250 + Math.random() * 1800;
+    const spawnY = State.CoMPosition.y + Math.cos(offsetTheta) * offsetR;
+    const spawnZ = State.CoMPosition.z + Math.sin(offsetTheta) * offsetR;
+    mesh.position.set(spawnForwardX, spawnY, spawnZ);
+    mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+    colossalBeltGroup.add(mesh);
+
+    // Velocity: MUST have at least one component from the forward (vx < 0)
+    // and can approach from ANY radial angle
+    const speed = Tuning.IncomingAsteroidSpeedCmPerSec * (0.85 + Math.random() * 0.35);
+    // Polar angle theta from negative X axis (0 to 28 degrees)
+    const angleFromForward = (Math.random() * 28.0) * (Math.PI / 180.0);
+    const azim = Math.random() * Math.PI * 2;
+
+    const vx = -speed * Math.cos(angleFromForward);
+    const vy = speed * Math.sin(angleFromForward) * Math.cos(azim);
+    const vz = speed * Math.sin(angleFromForward) * Math.sin(azim);
+
+    // Cubic mass scaling: M = 4/3 * pi * (r_m)^3 * density (2600 kg/m^3)
+    const radiusMeters = baseRadius * 0.01;
+    const volumeM3 = (4.0 / 3.0) * Math.PI * Math.pow(radiusMeters, 3);
+    const massKg = Math.round(volumeM3 * 2600.0);
+
+    const nameLetter = ColossalGreekLetters[(colossalAsteroidSeq++) % ColossalGreekLetters.length];
+    const designation = `ASTEROID [${nameLetter}-${Math.floor(10 + Math.random() * 90)}]`;
+
+    colossalIncomingAsteroids.push({
+      mesh: mesh,
+      radius: baseRadius,
+      massKg: massKg,
+      velocity: new THREE.Vector3(vx, vy, vz),
+      rotSpeed: new THREE.Vector3(
+        (Math.random() - 0.5) * 0.3,
+        (Math.random() - 0.5) * 0.3,
+        (Math.random() - 0.5) * 0.3
+      ),
+      name: designation,
+      destroyed: false,
+      rangeCm: 99999.0,
+      closingSpeedCms: 0.0,
+      ttiSeconds: 99.9,
+      bIsCritical: false
+    });
+  }
+
+  function createColossalAsteroidBeltEnvironment() {
+    clearActiveSectorEnvironment();
+    colossalBeltGroup = new THREE.Group();
+    scene.add(colossalBeltGroup);
+
+    // 1. Vast background belt (outside view: r in [160m, 450m], x in [-200m, +800m])
+    const outerBeltCount = 55;
+    const asteroidGeos = [
+      new THREE.DodecahedronGeometry(1, 1),
+      new THREE.IcosahedronGeometry(1, 1),
+      new THREE.OctahedronGeometry(1, 2),
+    ];
+
+    const outerMat = new THREE.MeshStandardMaterial({
+      color: 0x242d38,
+      roughness: 0.88,
+      metalness: 0.15,
+      flatShading: true,
+    });
+
+    for (let i = 0; i < outerBeltCount; i++) {
+      const geo = asteroidGeos[i % asteroidGeos.length];
+      const mesh = new THREE.Mesh(geo, outerMat);
+
+      // Huge size: 10m to 45m radius (1000cm to 4500cm)
+      const radius = 1000 + Math.random() * 3500;
+      mesh.scale.set(
+        radius * (0.8 + Math.random() * 0.4),
+        radius * (0.8 + Math.random() * 0.4),
+        radius * (0.8 + Math.random() * 0.4)
+      );
+
+      // Belt cylindrical coordinates: radial distance outside standard view (16,000 to 45,000 cm)
+      const theta = Math.random() * Math.PI * 2;
+      const r = 16000 + Math.random() * 28000;
+      const posX = -20000 + Math.random() * 80000;
+      const posY = Math.cos(theta) * r;
+      const posZ = Math.sin(theta) * r;
+
+      mesh.position.set(posX, posY, posZ);
+      mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      colossalBeltGroup.add(mesh);
+
+      colossalBackgroundAsteroids.push({
+        mesh: mesh,
+        rotSpeed: new THREE.Vector3(
+          (Math.random() - 0.5) * 0.05,
+          (Math.random() - 0.5) * 0.05,
+          (Math.random() - 0.5) * 0.05
+        )
+      });
+    }
+
+    // 2. Initial Dynamic Incoming Colossal Asteroids
+    colossalIncomingAsteroids = [];
+    const initialIncomingCount = 5;
+    for (let i = 0; i < initialIncomingCount; i++) {
+      spawnIncomingColossalAsteroid(4500 + i * 2800);
+    }
+
+    // 3. Kinetic Flux Line Mesh (Visual link between player and target)
+    if (!kineticFluxLine) {
+      const lineGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(0, 0, 100)
+      ]);
+      const lineMat = new THREE.LineBasicMaterial({
+        color: 0x00f0ff,
+        linewidth: 3,
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending
+      });
+      kineticFluxLine = new THREE.Line(lineGeo, lineMat);
+      kineticFluxLine.visible = false;
+      scene.add(kineticFluxLine);
+    }
+
+    // 4. Kinetic Shockwave Ring Mesh
+    if (!kineticShockwaveMesh) {
+      const ringGeo = new THREE.RingGeometry(10, 30, 32);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0x00f0ff,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.0,
+        blending: THREE.AdditiveBlending
+      });
+      kineticShockwaveMesh = new THREE.Mesh(ringGeo, ringMat);
+      kineticShockwaveMesh.visible = false;
+      scene.add(kineticShockwaveMesh);
+    }
+  }
+
+  function updateColossalAsteroidBelt(dt) {
+    if (!colossalBeltGroup) return;
+
+    const playerPos = new THREE.Vector3(
+      State.CoMPosition.x,
+      State.CoMPosition.y + State.InternalDisplacement.y,
+      State.CoMPosition.z + State.InternalDisplacement.z
+    );
+
+    // 1. Rotate background outer belt monoliths
+    for (const bg of colossalBackgroundAsteroids) {
+      bg.mesh.rotation.x += bg.rotSpeed.x * dt;
+      bg.mesh.rotation.y += bg.rotSpeed.y * dt;
+      bg.mesh.rotation.z += bg.rotSpeed.z * dt;
+    }
+
+    // 2. Advance oncoming asteroids
+    for (let i = colossalIncomingAsteroids.length - 1; i >= 0; i--) {
+      const ast = colossalIncomingAsteroids[i];
+      if (ast.destroyed) continue;
+
+      ast.mesh.position.x += ast.velocity.x * dt;
+      ast.mesh.position.y += ast.velocity.y * dt;
+      ast.mesh.position.z += ast.velocity.z * dt;
+
+      ast.mesh.rotation.x += ast.rotSpeed.x * dt;
+      ast.mesh.rotation.y += ast.rotSpeed.y * dt;
+      ast.mesh.rotation.z += ast.rotSpeed.z * dt;
+
+      // Check direct collision with player body
+      const distToPlayer = ast.mesh.position.distanceTo(playerPos);
+      const collisionThreshold = ast.radius + 40.0;
+
+      if (distToPlayer <= collisionThreshold && State.RunPhase === 'Running') {
+        const relSpeed = ast.velocity.length();
+        triggerKineticCrash({ name: ast.name, isAsteroid: true }, relSpeed);
+        return;
+      }
+
+      // Despawn if far behind player or deflected far out
+      if (ast.mesh.position.x < State.CoMPosition.x - 6000 || ast.mesh.position.length() > 90000) {
+        if (State.KineticTarget === ast) {
+          unlockKineticTarget();
+        }
+        colossalBeltGroup.remove(ast.mesh);
+        if (ast.mesh.geometry) ast.mesh.geometry.dispose();
+        if (ast.mesh.material) ast.mesh.material.dispose();
+        colossalIncomingAsteroids.splice(i, 1);
+      }
+    }
+
+    // Maintain 4 to 6 oncoming colossal asteroids
+    colossalSpawnTimer += dt;
+    if (colossalIncomingAsteroids.length < 5 && colossalSpawnTimer >= 1.8) {
+      colossalSpawnTimer = 0;
+      spawnIncomingColossalAsteroid(State.CoMPosition.x + 16000 + Math.random() * 4000);
+    }
+
+    // 3. Update expanding kinetic shockwave ring
+    if (kineticShockwaveMesh && kineticShockwaveMesh.visible) {
+      kineticShockwaveMesh.scale.addScalar(dt * 35.0);
+      kineticShockwaveMesh.material.opacity -= dt * 2.8;
+      if (kineticShockwaveMesh.material.opacity <= 0.0) {
+        kineticShockwaveMesh.visible = false;
+      }
+    }
+  }
+
+  function updateKineticTargetingAndAim() {
+    const playerPos = new THREE.Vector3(
+      State.CoMPosition.x,
+      State.CoMPosition.y + State.InternalDisplacement.y,
+      State.CoMPosition.z + State.InternalDisplacement.z
+    );
+
+    const reticleEl = document.getElementById('kinetic-target-reticle');
+    const dilemmaEl = document.getElementById('target-proximity-dilemma');
+    const rangeEl = document.getElementById('target-range');
+    const ttiEl = document.getElementById('target-tti');
+
+    aimRaycaster.setFromCamera(mouseNormalized, camera);
+
+    if (State.KineticLockStatus !== 'Locked') {
+      let bestCandidate = null;
+      let minAngularDist = 0.45; // ~25 deg cone
+
+      for (const ast of colossalIncomingAsteroids) {
+        if (ast.destroyed) continue;
+        const toAst = new THREE.Vector3().subVectors(ast.mesh.position, camera.position);
+        const dist = toAst.length();
+        if (dist > 30000 || toAst.x < 0) continue;
+
+        const dirToAst = toAst.normalize();
+        const rayDir = aimRaycaster.ray.direction;
+        const angle = rayDir.angleTo(dirToAst);
+
+        if (angle < minAngularDist) {
+          minAngularDist = angle;
+          bestCandidate = ast;
+        }
+      }
+
+      State.CandidateTarget = bestCandidate;
+      if (reticleEl) reticleEl.classList.add('hidden');
+      if (kineticFluxLine) kineticFluxLine.visible = false;
+      return;
+    }
+
+    // We ARE Locked to State.KineticTarget
+    const target = State.KineticTarget;
+    if (!target || target.destroyed || target.mesh.position.x < State.CoMPosition.x - 1500) {
+      unlockKineticTarget();
+      return;
+    }
+
+    const toTarget = new THREE.Vector3().subVectors(target.mesh.position, playerPos);
+    const distCm = toTarget.length();
+    target.rangeCm = distCm;
+
+    const relVel = new THREE.Vector3(
+      target.velocity.x - State.CoMVelocity.x,
+      target.velocity.y - (State.CoMVelocity.y + State.LateralVelocity.y),
+      target.velocity.z - (State.CoMVelocity.z + State.LateralVelocity.z)
+    );
+
+    const unitToTarget = toTarget.clone().normalize();
+    const closingSpeedCms = -relVel.dot(unitToTarget);
+    target.closingSpeedCms = closingSpeedCms;
+
+    const tti = closingSpeedCms > 10.0 ? (distCm / closingSpeedCms) : 99.9;
+    target.ttiSeconds = tti;
+
+    const bIsCritical = distCm <= Tuning.CriticalDangerDistanceCm;
+    target.bIsCritical = bIsCritical;
+
+    const screenPos = target.mesh.position.clone().project(camera);
+
+    if (screenPos.z > 1.0) {
+      if (reticleEl) reticleEl.classList.add('hidden');
+    } else {
+      const screenX = (screenPos.x * 0.5 + 0.5) * window.innerWidth;
+      const screenY = (-(screenPos.y * 0.5) + 0.5) * window.innerHeight;
+
+      if (reticleEl) {
+        reticleEl.style.left = `${screenX}px`;
+        reticleEl.style.top = `${screenY}px`;
+        reticleEl.classList.remove('hidden');
+      }
+
+      if (rangeEl) rangeEl.textContent = `${Math.round(distCm * 0.01)}m`;
+      if (ttiEl) ttiEl.textContent = tti < 99 ? `${tti.toFixed(1)}s` : 'CLEAR';
+
+      // Proximity dilemma: box turns rose + short TOO CLOSE tag
+      if (reticleEl) reticleEl.classList.toggle('critical', bIsCritical);
+      if (dilemmaEl) {
+        dilemmaEl.classList.toggle('hidden', !bIsCritical);
+      }
+    }
+
+    // Update 3D Kinetic Flux Beam
+    if (kineticFluxLine) {
+      kineticFluxLine.visible = true;
+      const linePositions = kineticFluxLine.geometry.attributes.position.array;
+      linePositions[0] = playerPos.x + 25;
+      linePositions[1] = playerPos.y;
+      linePositions[2] = playerPos.z;
+      linePositions[3] = target.mesh.position.x;
+      linePositions[4] = target.mesh.position.y;
+      linePositions[5] = target.mesh.position.z;
+      kineticFluxLine.geometry.attributes.position.needsUpdate = true;
+
+      if (State.bIsChargingKineticPush) {
+        kineticFluxLine.material.color.setHex(bIsCritical ? 0xffb703 : 0x00f0ff);
+        kineticFluxLine.material.opacity = 0.5 + State.KineticPushCharge * 0.5;
+      } else {
+        kineticFluxLine.material.color.setHex(0x00f0ff);
+        kineticFluxLine.material.opacity = 0.45;
+      }
+    }
+  }
+
+  function lockKineticTarget() {
+    if (State.CandidateTarget) {
+      State.KineticTarget = State.CandidateTarget;
+      State.KineticLockStatus = 'Locked';
+      playTargetLockBeep(false);
+      updateHUD();
+    }
+  }
+
+  function unlockKineticTarget() {
+    State.KineticTarget = null;
+    State.KineticLockStatus = 'NoTarget';
+    const reticle = document.getElementById('kinetic-target-reticle');
+    if (reticle) reticle.classList.add('hidden');
+    if (kineticFluxLine) kineticFluxLine.visible = false;
+    updateHUD();
+  }
+
+  function startChargingKineticPush() {
+    if (State.RunPhase !== 'Running') return;
+    State.bIsChargingKineticPush = true;
+  }
+
+  function releaseAndDeployKineticPush() {
+    if (!State.bIsChargingKineticPush) return;
+    State.bIsChargingKineticPush = false;
+
+    const charge = Math.max(0.12, State.KineticPushCharge);
+    State.KineticPushCharge = 0.0;
+
+    if (State.KineticLockStatus !== 'Locked' || !State.KineticTarget) {
+      return;
+    }
+
+    const target = State.KineticTarget;
+    const playerPos = new THREE.Vector3(
+      State.CoMPosition.x,
+      State.CoMPosition.y + State.InternalDisplacement.y,
+      State.CoMPosition.z + State.InternalDisplacement.z
+    );
+
+    const toTarget = new THREE.Vector3().subVectors(target.mesh.position, playerPos);
+    const distCm = toTarget.length();
+    const unitPush = toTarget.clone().normalize();
+
+    const forceKN = charge * Tuning.MaxPushForceKiloNewtons;
+    const impulseNs = forceKN * 1000.0 * 0.22;
+
+    // --- PROXIMITY DILEMMA CHECK ---
+    // If closer than critical distance (18m) and push charge < 70%:
+    // "IT WILL PUSH IT" — asteroid's colossal inertia overpowers player repulsion!
+    if (distCm <= Tuning.CriticalDangerDistanceCm && charge < 0.70) {
+      playAsteroidOverpoweredSound();
+      triggerAsteroidOverpowerFlash();
+
+      State.CoMVelocity.x -= 820.0 * Tuning.OverpowerRatio;
+      State.LateralVelocity.y += (Math.random() - 0.5) * 600.0;
+      State.LateralVelocity.z += (Math.random() - 0.5) * 400.0;
+      State.CameraTrauma = 1.0;
+
+      spawnKineticSparks(playerPos, 40);
+      unlockKineticTarget();
+      return;
+    }
+
+    // --- SUCCESSFUL KINETIC PUSH DEFLECTION ---
+    const deltaVTargetCms = (impulseNs / target.massKg) * 100.0;
+    target.velocity.x += unitPush.x * deltaVTargetCms;
+    target.velocity.y += unitPush.y * deltaVTargetCms;
+    target.velocity.z += unitPush.z * deltaVTargetCms;
+
+    target.rotSpeed.x += (Math.random() - 0.5) * 0.25;
+    target.rotSpeed.y += (Math.random() - 0.5) * 0.25;
+
+    const playerMassKg = Tuning.AstronautMassKg + Tuning.MaceMassKg;
+    const deltaVPlayerCms = (impulseNs * Tuning.ImpulseEfficiencyAlpha / playerMassKg) * 100.0;
+
+    State.CoMVelocity.x -= unitPush.x * deltaVPlayerCms * 0.65;
+    State.LateralVelocity.y -= unitPush.y * deltaVPlayerCms;
+    State.LateralVelocity.z -= unitPush.z * deltaVPlayerCms;
+
+    playKineticPushBlastSound(forceKN);
+    triggerPushDeflectionFlash(forceKN);
+    spawnKineticSparks(target.mesh.position, 55);
+
+    if (kineticShockwaveMesh) {
+      kineticShockwaveMesh.position.copy(target.mesh.position);
+      kineticShockwaveMesh.lookAt(playerPos);
+      kineticShockwaveMesh.scale.set(1, 1, 1);
+      kineticShockwaveMesh.material.opacity = 1.0;
+      kineticShockwaveMesh.visible = true;
+    }
+
+    State.CameraTrauma = Math.min(1.0, 0.45 + charge * 0.4);
+    State.StrikeCount++;
+  }
+
+  function triggerPushDeflectionFlash(forceKN) {
+    showToast(`PUSH ${forceKN.toFixed(0)} kN`, 'gold');
+    const container = document.getElementById('canvas-container');
+    if (container) {
+      container.style.filter = 'brightness(1.8) drop-shadow(0 0 45px rgba(0,240,255,0.9))';
+      setTimeout(() => { container.style.filter = 'none'; }, 160);
+    }
+  }
+
+  function triggerAsteroidOverpowerFlash() {
+    showToast('OVERPOWERED!', 'rose');
+    const container = document.getElementById('canvas-container');
+    if (container) {
+      container.style.filter = 'brightness(2.2) drop-shadow(0 0 60px rgba(239,68,68,0.95)) hue-rotate(300deg)';
+      setTimeout(() => { container.style.filter = 'none'; }, 220);
+    }
+  }
+
+  function onMouseMoveAim(e) {
+    mouseNormalized.x = (e.clientX / window.innerWidth) * 2 - 1;
+    mouseNormalized.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+    const crosshair = document.getElementById('aim-crosshair-3d');
+    if (crosshair && Tuning.ActiveScreenMode === 'ColossalBelt') {
+      crosshair.style.left = `${e.clientX}px`;
+      crosshair.style.top = `${e.clientY}px`;
+      crosshair.classList.toggle('has-candidate', !!State.CandidateTarget);
+    }
+  }
+
+  function setScreenMode(mode) {
+    Tuning.ActiveScreenMode = mode;
+    const btnGauntlet = document.getElementById('btn-screen-gauntlet');
+    const btnColossal = document.getElementById('btn-screen-colossal');
+    const aimCrosshair = document.getElementById('aim-crosshair-3d');
+    const kineticCard = document.getElementById('card-kinetic-target');
+    const pushCard = document.getElementById('card-push-force');
+
+    if (mode === 'ColossalBelt') {
+      if (btnGauntlet) btnGauntlet.classList.remove('active');
+      if (btnColossal) btnColossal.classList.add('active');
+      if (aimCrosshair) aimCrosshair.classList.remove('hidden');
+      if (kineticCard) kineticCard.classList.remove('hidden');
+      if (pushCard) pushCard.classList.remove('hidden');
+
+      const launchBanner = document.getElementById('launch-guidance-banner');
+      if (launchBanner) launchBanner.classList.add('hidden');
+
+      loadSector(State.CurrentSectorIndex);
+    } else {
+      if (btnGauntlet) btnGauntlet.classList.add('active');
+      if (btnColossal) btnColossal.classList.remove('active');
+      if (aimCrosshair) aimCrosshair.classList.add('hidden');
+      const reticle = document.getElementById('kinetic-target-reticle');
+      if (reticle) reticle.classList.add('hidden');
+
+      loadSector(State.CurrentSectorIndex);
+    }
   }
 
   function createMilestoneGates(sector) {
@@ -2386,6 +3117,12 @@
     clearActiveSectorEnvironment();
     updateSectorAtmosphere(sectorIndex);
 
+    if (Tuning.ActiveScreenMode === 'ColossalBelt') {
+      createColossalAsteroidBeltEnvironment();
+      restartRun();
+      return;
+    }
+
     // Populate slalom gates
     SlalomTargets = sector.gates.map(g => ({ ...g, evaluated: false, cleared: false }));
 
@@ -2439,15 +3176,25 @@
     lastTime = now;
     if (dt > 0.05) dt = 0.05;
 
-    // 120Hz Substepping
-    const substeps = 4;
-    const subDt = dt / substeps;
-    for (let s = 0; s < substeps; s++) {
-      physicsTick(subDt);
-    }
+    // Title / pause freeze the simulation but keep rendering
+    const simActive = UI.screen !== 'paused' && UI.screen !== 'title';
 
-    updateHyperspaceSpeedDust(dt);
-    updateKineticSparks(dt);
+    if (simActive) {
+      // 120Hz Substepping
+      const substeps = 4;
+      const subDt = dt / substeps;
+      for (let s = 0; s < substeps; s++) {
+        physicsTick(subDt);
+      }
+
+      if (Tuning.ActiveScreenMode === 'ColossalBelt') {
+        updateColossalAsteroidBelt(dt);
+        updateKineticTargetingAndAim();
+      }
+
+      updateHyperspaceSpeedDust(dt);
+      updateKineticSparks(dt);
+    }
     update3DVisuals();
     updateHUD();
     drawTacticalRadar();
@@ -2682,7 +3429,7 @@
 
   // --- Tactical Navigational Radar Renderer (120m Lookahead Cockpit Mirror) ---
   function drawTacticalRadar() {
-    const canvas = document.getElementById('radar-canvas');
+    const canvas = HUD.radarCanvas || document.getElementById('radar-canvas');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const width = canvas.width;
@@ -2692,6 +3439,10 @@
     const scale = (center - 10) / radarRangeCm;
 
     ctx.clearRect(0, 0, width, height);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(center, center, center, 0, Math.PI * 2);
+    ctx.clip(); // circular radar disc
 
     // 1. Concentric Range Rings (30m, 60m, 90m, 120m)
     const ringSteps = [3000, 6000, 9000, 12000];
@@ -2704,14 +3455,6 @@
       ctx.arc(center, center, radius, 0, Math.PI * 2);
       ctx.stroke();
     }
-
-    // Range Distance Labels
-    ctx.fillStyle = 'rgba(0, 240, 255, 0.45)';
-    ctx.font = '8px "JetBrains Mono", monospace';
-    ctx.fillText('30m', center + 2, center - 3000 * scale + 8);
-    ctx.fillText('60m', center + 2, center - 6000 * scale + 8);
-    ctx.fillText('90m', center + 2, center - 9000 * scale + 8);
-    ctx.fillText('120m', center + 2, center - 12000 * scale + 8);
 
     // 2. Tunnel Corridor Boundaries (800cm width lines)
     const tunnelHalfWidth = 800 * scale;
@@ -2763,6 +3506,37 @@
         const blipSize = Math.max(2.5, (obs.radius * scale) * 0.5);
         ctx.arc(canvasX, canvasY, blipSize, 0, Math.PI * 2);
         ctx.fill();
+      }
+    }
+
+    // Colossal Incoming Asteroids (In ColossalBelt mode)
+    if (Tuning.ActiveScreenMode === 'ColossalBelt') {
+      for (const ast of colossalIncomingAsteroids) {
+        if (ast.destroyed) continue;
+        const relX = ast.mesh.position.x - playerX;
+        const relY = ast.mesh.position.y - playerY;
+        const dist = Math.hypot(relX, relY);
+
+        if (dist <= radarRangeCm) {
+          contactCount++;
+          const canvasX = center + relY * scale;
+          const canvasY = center - relX * scale;
+
+          const isLocked = (State.KineticTarget === ast);
+          ctx.strokeStyle = isLocked ? '#f59e0b' : (ast.bIsCritical ? '#ef4444' : '#00f0ff');
+          ctx.fillStyle = isLocked ? 'rgba(245,158,11,0.35)' : (ast.bIsCritical ? 'rgba(239,68,68,0.35)' : 'rgba(0,240,255,0.25)');
+          ctx.lineWidth = isLocked ? 2.5 : 1.5;
+
+          const radarRadius = Math.max(4.5, (ast.radius * 0.01) * 0.7);
+          ctx.beginPath();
+          ctx.arc(canvasX, canvasY, radarRadius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+
+          if (isLocked) {
+            ctx.strokeRect(canvasX - radarRadius - 3, canvasY - radarRadius - 3, (radarRadius + 3) * 2, (radarRadius + 3) * 2);
+          }
+        }
       }
     }
 
@@ -2862,20 +3636,257 @@
     ctx.lineTo(center + Math.sin(headingRad) * 16, center - Math.cos(headingRad) * 16);
     ctx.stroke();
 
-    // Update contacts counter badge
-    const counterEl = document.getElementById('radar-contacts-count');
-    if (counterEl) {
-      counterEl.textContent = `${contactCount} CONTACTS`;
-    }
+    ctx.restore();
   }
 
   // --- HUD Updates ---
   function updateHUD() {
+    updateGameHUD();
+    if (UI.devOpen) updateDevHUD();
+  }
+
+  // --- Minimal Game HUD ---
+  // Creator: "make the game screen minimalistic with only the information needed.
+  //           the interface doesnt look vary playagle and game like right now."
+  const HUD_ARC_CIRCUMFERENCE = 2 * Math.PI * 52; // matches r=52 in #game-hud SVG dial
+  const HUD = { ready: false, markerKey: '', gateTicks: [], lastScore: 0, lastArcQ: -1, arcHot: false };
+
+  // First-runs key hint counter (localStorage, tolerant of blocked storage)
+  const HINT_MAX_RUNS = 3;
+  const HINT_STORAGE_KEY = 'SPACEMENTUM_HINT_RUNS_V1';
+
+  function readHintRuns() {
+    try {
+      return parseInt(localStorage.getItem(HINT_STORAGE_KEY), 10) || 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function countHintRun() {
+    HUD.hintRuns = readHintRuns() + 1;
+    try {
+      localStorage.setItem(HINT_STORAGE_KEY, String(HUD.hintRuns));
+    } catch (e) {}
+  }
+
+  function cacheHudRefs() {
+    HUD.progress = document.getElementById('hud-progress');
+    HUD.progressFill = document.getElementById('hud-progress-fill');
+    HUD.progressMarks = document.getElementById('hud-progress-marks');
+    HUD.progressPortal = document.getElementById('hud-progress-portal');
+    HUD.progressText = document.getElementById('hud-progress-text');
+    HUD.scoreVal = document.getElementById('hud-score-val');
+    HUD.streak = document.getElementById('hud-streak');
+    HUD.speedVal = document.getElementById('hud-speed-val');
+    HUD.powerArc = document.getElementById('hud-power-arc');
+    HUD.radarCanvas = document.getElementById('radar-canvas');
+    HUD.launchHeading = document.getElementById('launch-aim-text');
+    HUD.launchKeyA = document.getElementById('launch-key-a');
+    HUD.launchKeyD = document.getElementById('launch-key-d');
+    HUD.launchHold = document.getElementById('btn-charge-push');
+    HUD.launchHoldText = document.getElementById('charge-btn-text');
+    HUD.hints = document.getElementById('hud-hints');
+    HUD.vignette = document.getElementById('vignette-proximity');
+    HUD.chevron = document.getElementById('threat-chevron');
+    HUD.impactTag = document.getElementById('impact-tag');
+    HUD.doomOverlay = document.getElementById('doom-overlay');
+    HUD.hintRuns = readHintRuns();
+    HUD.ready = true;
+  }
+
+  // Only touch the DOM when a value actually changed
+  function setHudText(el, value) {
+    if (el && el._hudV !== value) {
+      el._hudV = value;
+      el.textContent = value;
+    }
+  }
+
+  function setHudClass(el, className) {
+    if (el && el.className !== className) el.className = className;
+  }
+
+  // Rebuild gate ticks / milestone diamonds / portal color when sector or mode changes
+  function rebuildProgressMarkers(sector) {
+    HUD.progressMarks.innerHTML = '';
+    HUD.gateTicks = [];
+    HUD.diamonds = [];
+    const len = sector.corridorLengthCm;
+    for (const g of sector.gates) {
+      const tick = document.createElement('div');
+      tick.className = 'hud-tick';
+      tick.style.left = `${(g.forwardX / len) * 100}%`;
+      HUD.progressMarks.appendChild(tick);
+      HUD.gateTicks.push(tick);
+    }
+    for (const m of sector.milestones || []) {
+      const d = document.createElement('div');
+      d.className = 'hud-diamond';
+      d.style.left = `${(m.distCm / len) * 100}%`;
+      d.dataset.dist = m.distCm;
+      HUD.progressMarks.appendChild(d);
+      HUD.diamonds.push(d);
+    }
+    HUD.progressPortal.style.borderColor = sector.portalThemeColorStr;
+    HUD.progressPortal.style.color = sector.portalThemeColorStr;
+  }
+
+  const _alertVec = new THREE.Vector3();
+
+  function updateHudAlerts() {
+    const alarm = State.ProximityAlarm;
+    const running = State.RunPhase === 'Running';
+    const threat = running && alarm.bIsActive ? alarm.threatRatio : 0.0;
+
+    // Vignette opacity scales with the existing threat ratio (quantized to avoid per-frame style churn)
+    const vq = Math.round(threat * 40) / 40;
+    if (HUD.vignetteQ !== vq) {
+      HUD.vignetteQ = vq;
+      HUD.vignette.style.opacity = String(Math.min(1, vq * 1.1));
+    }
+
+    // Edge chevron pointing at the nearest threat
+    const showChevron = threat > 0.05 && alarm.nearestPos && camera;
+    if (showChevron) {
+      _alertVec.copy(alarm.nearestPos).project(camera);
+      let nx = _alertVec.x;
+      let ny = _alertVec.y;
+      if (_alertVec.z > 1.0) { nx = -nx; ny = -ny; } // behind camera: mirror to the opposite edge
+      const m = Math.max(Math.abs(nx), Math.abs(ny));
+      const s = m > 0.0001 ? 0.88 / m : 0;
+      if (m <= 0.0001) ny = -1; // dead centre: point up
+      const ex = m > 0.0001 ? nx * s : 0;
+      const ey = m > 0.0001 ? ny * s : -0.88;
+      const px = (ex * 0.5 + 0.5) * window.innerWidth;
+      const py = (-ey * 0.5 + 0.5) * window.innerHeight;
+      const angle = Math.atan2(-ey, ex) * (180 / Math.PI);
+      HUD.chevron.style.transform = `translate(${px.toFixed(0)}px, ${py.toFixed(0)}px) rotate(${angle.toFixed(0)}deg)`;
+    }
+    HUD.chevron.classList.toggle('hidden', !showChevron);
+
+    // "IMPACT" only when closer than 40% of the alarm distance (threat ratio > 0.6)
+    HUD.impactTag.classList.toggle('hidden', !(threat > 0.6));
+
+    // Doom: only shown while a doom verdict is pending
+    const doom = running && State.DoomSnapshot.bIsDoomImminent;
+    HUD.doomOverlay.classList.toggle('hidden', !doom);
+  }
+
+  // Player-facing HUD (always runs)
+  function updateGameHUD() {
+    if (!HUD.ready) cacheHudRefs();
+
+    const isCorridor = Tuning.ActiveScreenMode !== 'ColossalBelt';
+    const sector = SectorCatalog[State.CurrentSectorIndex];
+
+    // Progress bar (corridor only)
+    HUD.progress.style.visibility = isCorridor ? 'visible' : 'hidden';
+    if (isCorridor && sector) {
+      const markerKey = `${State.CurrentSectorIndex}|${SlalomTargets.length}`;
+      if (HUD.markerKey !== markerKey) {
+        HUD.markerKey = markerKey;
+        rebuildProgressMarkers(sector);
+      }
+      const frac = Math.max(0, Math.min(1, State.CoMPosition.x / sector.corridorLengthCm));
+      const pct = (frac * 100).toFixed(1);
+      if (HUD.progressFill._pct !== pct) {
+        HUD.progressFill._pct = pct;
+        HUD.progressFill.style.width = `${pct}%`;
+      }
+      const distM = Math.max(0, Math.round(State.CoMPosition.x * 0.01));
+      setHudText(HUD.progressText, `${distM} / ${Math.round(sector.corridorLengthCm * 0.01)} m`);
+      for (let i = 0; i < HUD.gateTicks.length && i < SlalomTargets.length; i++) {
+        const t = SlalomTargets[i];
+        setHudClass(HUD.gateTicks[i], t.evaluated ? (t.cleared ? 'hud-tick cleared' : 'hud-tick missed') : 'hud-tick');
+      }
+      for (const d of HUD.diamonds) {
+        setHudClass(d, State.CoMPosition.x >= parseFloat(d.dataset.dist) ? 'hud-diamond reached' : 'hud-diamond');
+      }
+    } else {
+      HUD.markerKey = '';
+    }
+
+    // Score + streak chip
+    const score = State.CurrentCompositeScore;
+    setHudText(HUD.scoreVal, score.toLocaleString());
+    if (score > HUD.lastScore) {
+      HUD.scoreVal.classList.remove('pop');
+      void HUD.scoreVal.offsetWidth; // restart the pop animation
+      HUD.scoreVal.classList.add('pop');
+    }
+    HUD.lastScore = score;
+    const showStreak = State.CleanEvasionStreak > 1;
+    HUD.streak.classList.toggle('hidden', !showStreak);
+    if (showStreak) setHudText(HUD.streak, `x${State.CleanEvasionStreak}`);
+
+    // Speed dial
+    const speedCms = Math.hypot(
+      State.CoMVelocity.x,
+      State.CoMVelocity.y + State.LateralVelocity.y,
+      State.CoMVelocity.z + State.LateralVelocity.z
+    );
+    setHudText(HUD.speedVal, String(Math.round(speedCms * 0.036)));
+
+    // Launch prompt (corridor LaunchPushOff only; hidden/faded by fireLaunchPush / restartRun)
+    if (isCorridor && State.RunPhase === 'LaunchPushOff') {
+      const a = State.LaunchAimAngleDeg;
+      setHudText(HUD.launchHeading, `${a >= 0 ? '+' : ''}${a.toFixed(1)}\u00B0`);
+      HUD.launchKeyA.classList.toggle('active', Input.isAPressed);
+      HUD.launchKeyD.classList.toggle('active', Input.isDPressed);
+      HUD.launchHold.classList.toggle('charging', State.bIsChargingPush);
+      setHudText(HUD.launchHoldText, State.bIsChargingPush ? 'RELEASE TO LAUNCH' : 'HOLD SPACE TO PUSH');
+    }
+
+    // Key hints: launch phase, plus first 8s of flight on the first 3 runs
+    let hintText = '';
+    if (isCorridor && State.RunPhase === 'LaunchPushOff') {
+      hintText = 'A / D spin \u00B7 release to kick \u00B7 ESC pause';
+    } else if (State.RunPhase === 'Running' && HUD.hintRuns <= HINT_MAX_RUNS && State.ActiveFlightTimeSeconds < 8.0) {
+      hintText = isCorridor
+        ? 'A / D spin \u00B7 release to kick \u00B7 ESC pause'
+        : 'CLICK/F lock \u00B7 hold SPACE push \u00B7 ESC pause';
+    }
+    setHudText(HUD.hints, hintText);
+    HUD.hints.classList.toggle('hidden', hintText === '');
+
+    // Alerts: proximity vignette + edge chevron + IMPACT tag, doom overlay
+    updateHudAlerts();
+
+    // Power arc: launch charge / push charge (Colossal) / spin energy in flight
+    let powerRatio;
+    if (!isCorridor) {
+      powerRatio = State.KineticPushCharge;
+    } else if (State.RunPhase === 'LaunchPushOff') {
+      powerRatio = State.LaunchPushCharge;
+    } else {
+      const tanSpeed = Math.abs(State.AngularVelocityRadPerSec) * (Tuning.TetherLengthCm * 0.01);
+      powerRatio = (0.5 * Tuning.MaceMassKg * tanSpeed * tanSpeed) / 4500.0;
+    }
+    powerRatio = Math.max(0, Math.min(1, powerRatio));
+    const arcQ = Math.round(powerRatio * 500);
+    if (arcQ !== HUD.lastArcQ) {
+      HUD.lastArcQ = arcQ;
+      HUD.powerArc.style.strokeDashoffset = (HUD_ARC_CIRCUMFERENCE * (1 - arcQ / 500)).toFixed(2);
+      const hot = powerRatio > 0.85;
+      if (hot !== HUD.arcHot) {
+        HUD.arcHot = hot;
+        HUD.powerArc.classList.toggle('hot', hot);
+      }
+    }
+  }
+
+  // Engineering telemetry (only while the Dev Overlay is visible)
+  function updateDevHUD() {
     // Phase Display
     const phaseEl = document.getElementById('stat-run-phase');
     const phaseSubEl = document.getElementById('stat-run-sub');
     if (phaseEl) {
-      if (State.RunPhase === 'LaunchPushOff') {
+      if (Tuning.ActiveScreenMode === 'ColossalBelt') {
+        phaseEl.textContent = 'COLOSSAL BELT (PUSH FIELD)';
+        phaseEl.className = 'metric-value highlight-gold';
+        if (phaseSubEl) phaseSubEl.textContent = 'KINETIC RETICLE ACTIVE [F/SPACE]';
+      } else if (State.RunPhase === 'LaunchPushOff') {
         phaseEl.textContent = 'LAUNCH PUSH-OFF';
         phaseEl.className = 'metric-value highlight-gold';
         if (phaseSubEl) phaseSubEl.textContent = 'ANCHORED ON ASTEROID';
@@ -3024,28 +4035,437 @@
       if (powerDescEl) powerDescEl.textContent = `Tangential strike ready: 40kg mace @ ${Math.round(tanSpeed * 100)} cm/s`;
     }
 
-    // --- Launch Guidance Banner Updates ---
-    const aimTextEl = document.getElementById('launch-aim-text');
-    if (aimTextEl && State.RunPhase === 'LaunchPushOff') {
-      const dirText = State.LaunchAimAngleDeg < -1.5 ? 'LEFT CORRIDOR' : State.LaunchAimAngleDeg > 1.5 ? 'RIGHT CORRIDOR' : 'CENTER CORRIDOR';
-      aimTextEl.textContent = `DEPARTURE HEADING: ${State.LaunchAimAngleDeg >= 0 ? '+' : ''}${State.LaunchAimAngleDeg.toFixed(1)}° [${dirText}]`;
+    // Step 8: Kinetic Target & Push Force Card Updates
+    const targetStatusEl = document.getElementById('stat-target-status');
+    const targetMetricsEl = document.getElementById('stat-target-metrics');
+    if (targetStatusEl && targetMetricsEl) {
+      if (State.KineticLockStatus === 'Locked' && State.KineticTarget) {
+        targetStatusEl.textContent = 'TARGET LOCKED';
+        targetStatusEl.className = 'metric-value highlight-gold';
+        const rangeM = (State.KineticTarget.rangeCm * 0.01).toFixed(1);
+        const ttiS = State.KineticTarget.ttiSeconds < 99 ? State.KineticTarget.ttiSeconds.toFixed(1) + 's' : '---';
+        targetMetricsEl.textContent = `Range: ${rangeM}m | TTI: ${ttiS} | Aim: ${State.KineticTarget.name}`;
+      } else if (State.CandidateTarget) {
+        targetStatusEl.textContent = 'CANDIDATE ACQUIRED';
+        targetStatusEl.className = 'metric-value highlight-cyan';
+        targetMetricsEl.textContent = `Press [F] or Click to Lock: ${State.CandidateTarget.name}`;
+      } else {
+        targetStatusEl.textContent = 'NO TARGET';
+        targetStatusEl.className = 'metric-value';
+        targetMetricsEl.textContent = 'Aim at asteroid to acquire lock';
+      }
+    }
+
+    const pushForceEl = document.getElementById('stat-push-force');
+    const pushStatusEl = document.getElementById('stat-push-status');
+    if (pushForceEl && pushStatusEl) {
+      const chargePct = Math.round(State.KineticPushCharge * 100);
+      const forceKN = (State.KineticPushCharge * Tuning.MaxPushForceKiloNewtons).toFixed(1);
+      pushForceEl.textContent = `${forceKN} kN`;
+      if (State.bIsChargingKineticPush) {
+        pushForceEl.className = 'metric-value highlight-gold';
+        pushStatusEl.textContent = `Charging: ${chargePct}% | Release to Fire`;
+      } else {
+        pushForceEl.className = 'metric-value highlight-cyan';
+        pushStatusEl.textContent = `Capacitor Ready (Hold SPACE)`;
+      }
     }
 
     // Key Pill Active States
-    document.getElementById('key-a').classList.toggle('active', Input.isAPressed);
-    document.getElementById('key-d').classList.toggle('active', Input.isDPressed);
-    document.getElementById('key-space').classList.toggle('active', Input.isSpacePressed);
   }
 
-  // --- Keyboard Event Listeners ---
+  // --- Dev Overlay Toggle ---
+  function setDevOverlay(open) {
+    UI.devOpen = open;
+    const overlay = document.getElementById('dev-overlay');
+    if (overlay) overlay.classList.toggle('hidden', !open);
+    if (open) updateDevHUD();
+  }
+
+  // --- Game Flow: screens, menus, pause, settings ---
+  // Creator: "make the game screen minimalistic with only the information needed.
+  //           the interface doesnt look vary playagle and game like right now."
+  // UI.screen is the run-flow state ('title' | 'playing' | 'paused' | 'results'); it is separate
+  // from State.RunPhase. Title/pause freeze the sim (see animate) but keep rendering.
+  const SETTINGS_KEY = 'SPACEMENTUM_SETTINGS_V1';
+  const SCREEN_IDS = { title: 'screen-title', paused: 'screen-pause' };
+  const SUB_IDS = { howto: 'screen-howto', settings: 'screen-settings', sector: 'sector-select-modal' };
+  const AUDIO_SETTINGS = [
+    // [menu slider, Tuning prop, menu label, dev-drawer slider, dev-drawer label]
+    ['set-master', 'AudioMasterVolume', 'set-master-val', 'slider-audio-volume', 'val-audio-volume'],
+    ['set-hum', 'EngineHumVolume', 'set-hum-val', 'slider-engine-hum', 'val-engine-hum'],
+    ['set-prox', 'ProximityAlarmVolume', 'set-prox-val', 'slider-prox-alarm-vol', 'val-prox-alarm-vol'],
+  ];
+
+  // Results (crash / void / victory): UI.screen = 'results' at once (blocks pause, keeps sim rendering),
+  // the card itself appears after a short beat so the crash flash / shake is seen first.
+  const RESULTS_DELAY_MS = 600;
+
+  function showResults(modalId) {
+    UI.screen = 'results';
+    UI.resultsModal = modalId;
+    document.body.dataset.screen = 'results';
+    clearHeldInput();
+    clearTimeout(UI.resultsTimer);
+    UI.resultsTimer = setTimeout(() => {
+      if (UI.screen !== 'results' || UI.resultsModal !== modalId) return;
+      const modal = document.getElementById(modalId);
+      if (modal) modal.classList.remove('hidden');
+      UI.menuIndex = 0;
+      selectMenuItem(0);
+    }, RESULTS_DELAY_MS);
+  }
+
+  // Distance / score / personal best for the crash + void cards
+  function fillRunStats(prefix) {
+    const dist = document.getElementById(`${prefix}-dist-val`);
+    const score = document.getElementById(`${prefix}-score-val`);
+    const best = document.getElementById(`${prefix}-best-val`);
+    if (dist) dist.textContent = `${Math.max(0, Math.round(State.CoMPosition.x * 0.01))} m`;
+    if (score) score.textContent = State.CurrentCompositeScore.toLocaleString();
+    if (best) {
+      const pb = Tuning.ActiveScreenMode !== 'ColossalBelt' ? SaveGame.getProfile().personalBests[State.CurrentSectorIndex] : null;
+      best.textContent = pb ? pb.compositeScore.toLocaleString() : '—';
+    }
+  }
+
+  function showScreen(name) {
+    clearTimeout(UI.resultsTimer);
+    UI.screen = name;
+    closeSubScreen(true);
+    document.body.dataset.screen = name;
+    for (const key in SCREEN_IDS) {
+      const el = document.getElementById(SCREEN_IDS[key]);
+      if (el) el.classList.toggle('hidden', key !== name);
+    }
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    if (name === 'title' || name === 'paused') clearHeldInput();
+    UI.audioDucked = name === 'title' || name === 'paused';
+    applyAudioDuck();
+    if (name === 'title') refreshTitleMenu();
+    UI.menuIndex = 0;
+    selectMenuItem(0);
+  }
+
+  // Drop held keys + in-progress charges so releases during a menu never fire kicks/pushes
+  function clearHeldInput() {
+    Input.isAPressed = false;
+    Input.isDPressed = false;
+    Input.isSpacePressed = false;
+    State.HeldSpinDirection = 'None';
+    State.bIsChargingPush = false;
+    State.bIsChargingKineticPush = false;
+    State.LaunchPushCharge = 0.0;
+    State.KineticPushCharge = 0.0;
+    const btn = document.getElementById('btn-charge-push');
+    if (btn) btn.classList.remove('charging');
+  }
+
+  function pauseGame() {
+    if (UI.screen !== 'playing' || UI.sub) return;
+    if (State.RunPhase !== 'LaunchPushOff' && State.RunPhase !== 'Running') return;
+    showScreen('paused');
+  }
+
+  function resumeGame() {
+    if (UI.screen !== 'paused') return;
+    lastTime = performance.now();
+    showScreen('playing');
+  }
+
+  function quitToTitle() {
+    restartRun();
+    UI.title.sector = State.CurrentSectorIndex;
+    UI.title.mode = Tuning.ActiveScreenMode;
+    showScreen('title');
+  }
+
+  function startRunFromTitle() {
+    State.CurrentSectorIndex = UI.title.sector;
+    setScreenMode(UI.title.mode); // reloads the sector and restarts the run -> UI.screen = 'playing'
+  }
+
+  function refreshTitleMenu() {
+    const sector = SectorCatalog[UI.title.sector];
+    const isCorridor = UI.title.mode !== 'ColossalBelt';
+    const sectorEl = document.getElementById('title-sector-val');
+    const modeEl = document.getElementById('title-mode-val');
+    const bestEl = document.getElementById('title-best');
+    if (sectorEl && sector) sectorEl.textContent = sector.name.replace(/^Sector \d+:\s*/, '');
+    if (modeEl) modeEl.textContent = isCorridor ? 'CORRIDOR' : 'COLOSSAL BELT';
+    if (bestEl) {
+      const pb = SaveGame.getProfile().personalBests[UI.title.sector];
+      bestEl.textContent = isCorridor && pb ? `BEST ${pb.compositeScore.toLocaleString()}` : ' ';
+    }
+  }
+
+  function refreshSectorCards() {
+    document.querySelectorAll('.sector-choice-card').forEach(card => {
+      card.classList.toggle('active', parseInt(card.dataset.sector, 10) === UI.title.sector);
+    });
+  }
+
+  function openSubScreen(name) {
+    UI.returnIndex = UI.menuIndex;
+    UI.sub = name;
+    const el = document.getElementById(SUB_IDS[name]);
+    if (el) el.classList.remove('hidden');
+    if (name === 'settings') syncAudioUI();
+    if (name === 'sector') refreshSectorCards();
+    UI.menuIndex = 0;
+    selectMenuItem(0);
+  }
+
+  function closeSubScreen(silent) {
+    if (!UI.sub) return;
+    const el = document.getElementById(SUB_IDS[UI.sub]);
+    if (el) el.classList.add('hidden');
+    UI.sub = null;
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    if (!silent) selectMenuItem(UI.returnIndex || 0);
+  }
+
+  function getMenuRoot() {
+    if (UI.sub === 'howto') return document.getElementById('screen-howto');
+    if (UI.sub === 'settings') return document.getElementById('screen-settings');
+    if (UI.sub === 'sector') return null;
+    if (UI.screen === 'title') return document.getElementById('title-menu');
+    if (UI.screen === 'paused') return document.getElementById('pause-menu');
+    if (UI.screen === 'results') return document.querySelector('.results-modal:not(.hidden) .menu-list');
+    return null;
+  }
+
+  function getMenuItems(root) {
+    if (!root) return [];
+    return Array.from(root.querySelectorAll('.menu-item, input[type=range]')).filter(el => el.offsetParent !== null);
+  }
+
+  function selectMenuItem(index) {
+    const items = getMenuItems(getMenuRoot());
+    if (items.length === 0) return;
+    const i = ((index % items.length) + items.length) % items.length;
+    UI.menuIndex = i;
+    items.forEach((el, n) => el.classList.toggle('selected', n === i));
+    if (items[i].tagName === 'INPUT') items[i].focus();
+    else if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  }
+
+  function playMenuBlip(confirm) {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(confirm ? 880 : 620, now);
+    gain.gain.setValueAtTime(0.08 * Tuning.AudioMasterVolume, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.075);
+  }
+
+  function cycleTitleOption(action, dir) {
+    if (action === 'mode') {
+      UI.title.mode = UI.title.mode === 'ColossalBelt' ? 'Gauntlet' : 'ColossalBelt';
+    } else if (action === 'sector') {
+      UI.title.sector = ((UI.title.sector - 1 + dir + 3) % 3) + 1;
+    } else {
+      return false;
+    }
+    refreshTitleMenu();
+    return true;
+  }
+
+  function activateMenuAction(action) {
+    switch (action) {
+      case 'play': startRunFromTitle(); break;
+      case 'sector': openSubScreen('sector'); break;
+      case 'mode': cycleTitleOption('mode', 1); break;
+      case 'howto': openSubScreen('howto'); break;
+      case 'settings': openSubScreen('settings'); break;
+      case 'back': closeSubScreen(); break;
+      case 'resume': resumeGame(); break;
+      case 'restart':
+      case 'retry': restartRun(); break;
+      case 'quit':
+      case 'menu': quitToTitle(); break;
+      case 'next': loadSector(State.CurrentSectorIndex < 3 ? State.CurrentSectorIndex + 1 : 1); break;
+    }
+  }
+
+  // Returns true when the key was consumed by the game-flow layer
+  function handleMenuKey(e, key) {
+    const screen = UI.screen;
+    const playing = screen === 'playing';
+
+    if (key === 'escape') {
+      e.preventDefault();
+      if (UI.sub) {
+        playMenuBlip(false);
+        closeSubScreen();
+      } else if (playing) {
+        pauseGame();
+      } else if (screen === 'paused') {
+        resumeGame();
+      }
+      return true;
+    }
+
+    if (!UI.sub && key === 'p' && (playing || screen === 'paused')) {
+      if (playing) pauseGame(); else resumeGame();
+      return true;
+    }
+
+    if (!UI.sub && key === 'r' && (playing || screen === 'paused' || screen === 'results')) {
+      restartRun();
+      return true;
+    }
+
+    if (playing && !UI.sub) return false;
+
+    // Sector selector (title screen): up/down picks, enter confirms
+    if (UI.sub === 'sector') {
+      if (key === 'arrowup' || key === 'arrowdown') {
+        e.preventDefault();
+        cycleTitleOption('sector', key === 'arrowup' ? -1 : 1);
+        refreshSectorCards();
+        playMenuBlip(false);
+      } else if (key === 'enter') {
+        e.preventDefault();
+        playMenuBlip(true);
+        closeSubScreen();
+      }
+      return true;
+    }
+
+    const items = getMenuItems(getMenuRoot());
+    if (key === 'arrowup' || key === 'arrowdown') {
+      e.preventDefault();
+      selectMenuItem(UI.menuIndex + (key === 'arrowup' ? -1 : 1));
+      playMenuBlip(false);
+    } else if (key === 'arrowleft' || key === 'arrowright') {
+      const item = items[UI.menuIndex];
+      if (item && item.dataset && screen === 'title' && !UI.sub) {
+        e.preventDefault();
+        if (cycleTitleOption(item.dataset.action, key === 'arrowleft' ? -1 : 1)) playMenuBlip(false);
+      }
+    } else if (key === 'enter') {
+      const item = items[UI.menuIndex];
+      if (item && item.tagName !== 'INPUT') {
+        e.preventDefault();
+        item.click();
+      }
+    }
+    return true;
+  }
+
+  // --- Audio settings (menu sliders mirror the dev-drawer sliders; persisted to localStorage) ---
+  function syncAudioUI() {
+    for (const [menuId, prop, menuValId, drawerId, drawerValId] of AUDIO_SETTINGS) {
+      const pct = Math.round(Tuning[prop] * 100);
+      for (const [id, valId] of [[menuId, menuValId], [drawerId, drawerValId]]) {
+        const slider = document.getElementById(id);
+        const label = document.getElementById(valId);
+        if (slider) slider.value = pct;
+        if (label) label.textContent = pct;
+      }
+    }
+  }
+
+  function saveSettings() {
+    try {
+      const data = {};
+      for (const [, prop] of AUDIO_SETTINGS) data[prop] = Tuning[prop];
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
+    } catch (e) {}
+  }
+
+  function loadSettings() {
+    try {
+      const data = JSON.parse(localStorage.getItem(SETTINGS_KEY));
+      if (data) {
+        for (const [, prop] of AUDIO_SETTINGS) {
+          const v = parseFloat(data[prop]);
+          if (isFinite(v)) Tuning[prop] = Math.max(0, Math.min(1, v));
+        }
+      }
+    } catch (e) {}
+    syncAudioUI();
+  }
+
+  function setupMenus() {
+    loadSettings();
+
+    for (const [menuId, prop] of AUDIO_SETTINGS) {
+      const slider = document.getElementById(menuId);
+      if (!slider) continue;
+      slider.addEventListener('input', () => {
+        Tuning[prop] = parseFloat(slider.value) / 100.0;
+        syncAudioUI();
+        saveSettings();
+      });
+    }
+    // Dev drawer edits (its own handlers already updated Tuning) keep the menu + storage in step
+    for (const [, , , drawerId] of AUDIO_SETTINGS) {
+      const slider = document.getElementById(drawerId);
+      if (slider) slider.addEventListener('input', () => { syncAudioUI(); saveSettings(); });
+    }
+    const resetBtn = document.getElementById('btn-reset-feel');
+    if (resetBtn) resetBtn.addEventListener('click', () => { syncAudioUI(); saveSettings(); });
+
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest ? e.target.closest('.menu-item[data-action]') : null;
+      if (!btn) return;
+      playMenuBlip(true);
+      btn.blur();
+      activateMenuAction(btn.dataset.action);
+    });
+
+    document.addEventListener('mouseover', (e) => {
+      const btn = e.target.closest ? e.target.closest('.menu-item') : null;
+      if (!btn) return;
+      const idx = getMenuItems(getMenuRoot()).indexOf(btn);
+      if (idx >= 0 && idx !== UI.menuIndex) selectMenuItem(idx);
+    });
+
+    // Auto-pause when the window loses focus / tab is hidden
+    window.addEventListener('blur', pauseGame);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) pauseGame();
+    });
+  }
+
+  // --- Keyboard & Mouse Event Listeners ---
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
     const key = e.key.toLowerCase();
 
-    if (key === ' ') {
+    if (e.code === 'Backquote' || key === 'f3') {
+      e.preventDefault();
+      setDevOverlay(!UI.devOpen);
+      return;
+    }
+
+    if (handleMenuKey(e, key)) return;
+    if (UI.screen !== 'playing') return;
+
+    if (key === ' ' || e.code === 'Space') {
+      e.preventDefault();
       Input.isSpacePressed = true;
-      if (State.RunPhase === 'LaunchPushOff') {
+      if (Tuning.ActiveScreenMode === 'ColossalBelt') {
+        startChargingKineticPush();
+      } else if (State.RunPhase === 'LaunchPushOff') {
         startChargingPush();
+      }
+    } else if (key === 'f') {
+      if (Tuning.ActiveScreenMode === 'ColossalBelt') {
+        if (State.KineticLockStatus === 'Locked') {
+          unlockKineticTarget();
+        } else {
+          lockKineticTarget();
+        }
       }
     } else if (key === 'a') {
       Input.isAPressed = true;
@@ -3056,26 +4476,46 @@
       Input.lastDPressTime = performance.now();
       evaluateActiveSpin();
     } else if (key === 'm') {
-      toggleKickModel();
-    } else if (key === 'r') {
-      restartRun();
+      if (UI.devOpen) toggleKickModel();
     }
   });
 
   window.addEventListener('keyup', (e) => {
     const key = e.key.toLowerCase();
 
-    if (key === ' ') {
+    if (key === ' ' || e.code === 'Space') {
+      if (UI.screen === 'playing') e.preventDefault();
       Input.isSpacePressed = false;
-      if (State.RunPhase === 'LaunchPushOff') {
+      if (UI.screen !== 'playing') return;
+      if (Tuning.ActiveScreenMode === 'ColossalBelt') {
+        releaseAndDeployKineticPush();
+      } else if (State.RunPhase === 'LaunchPushOff') {
         fireLaunchPush();
       }
     } else if (key === 'a') {
       Input.isAPressed = false;
-      evaluateActiveSpin();
+      if (UI.screen === 'playing') evaluateActiveSpin();
     } else if (key === 'd') {
       Input.isDPressed = false;
-      evaluateActiveSpin();
+      if (UI.screen === 'playing') evaluateActiveSpin();
+    }
+  });
+
+  window.addEventListener('mousemove', onMouseMoveAim);
+
+  window.addEventListener('mousedown', (e) => {
+    if (UI.screen !== 'playing') return;
+    if (e.target.closest('#dev-overlay') || e.target.closest('.screen-overlay') || e.target.closest('.failure-modal') || e.target.closest('button')) {
+      return;
+    }
+    if (Tuning.ActiveScreenMode === 'ColossalBelt') {
+      if (e.button === 0) {
+        if (State.KineticLockStatus === 'Locked') {
+          unlockKineticTarget();
+        } else {
+          lockKineticTarget();
+        }
+      }
     }
   });
 
@@ -3203,6 +4643,43 @@
         document.getElementById('val-prox-dist').textContent = '25';
         document.getElementById('slider-plasma-heat').value = 100;
         document.getElementById('val-plasma-heat').textContent = '100';
+
+        Tuning.ColossalAsteroidScale = 1.0;
+        Tuning.OuterBeltRadiusCm = 35000.0;
+        Tuning.IncomingAsteroidSpeedCmPerSec = 1600.0;
+        Tuning.MaxPushForceKiloNewtons = 50.0;
+        Tuning.CriticalDangerDistanceCm = 1800.0;
+        Tuning.OverpowerRatio = 1.35;
+
+        const sScale = document.getElementById('slider-colossal-scale');
+        if (sScale) sScale.value = 1.0;
+        const vScale = document.getElementById('val-colossal-scale');
+        if (vScale) vScale.textContent = '1.0';
+
+        const sBelt = document.getElementById('slider-belt-radius');
+        if (sBelt) sBelt.value = 350;
+        const vBelt = document.getElementById('val-belt-radius');
+        if (vBelt) vBelt.textContent = '350';
+
+        const sSpd = document.getElementById('slider-incoming-speed');
+        if (sSpd) sSpd.value = 1600;
+        const vSpd = document.getElementById('val-incoming-speed');
+        if (vSpd) vSpd.textContent = '1600';
+
+        const sPush = document.getElementById('slider-push-force');
+        if (sPush) sPush.value = 50;
+        const vPush = document.getElementById('val-push-force');
+        if (vPush) vPush.textContent = '50';
+
+        const sCrit = document.getElementById('slider-crit-dist');
+        if (sCrit) sCrit.value = 18;
+        const vCrit = document.getElementById('val-crit-dist');
+        if (vCrit) vCrit.textContent = '18';
+
+        const sOver = document.getElementById('slider-overpower-ratio');
+        if (sOver) sOver.value = 1.35;
+        const vOver = document.getElementById('val-overpower-ratio');
+        if (vOver) vOver.textContent = '1.35';
       });
     }
 
@@ -3224,19 +4701,6 @@
       });
     }
 
-    // Modal retry buttons
-    const restartVoidBtn = document.getElementById('btn-restart-void');
-    if (restartVoidBtn) restartVoidBtn.addEventListener('click', restartRun);
-
-    const restartCrashBtn = document.getElementById('btn-restart-crash');
-    if (restartCrashBtn) restartCrashBtn.addEventListener('click', restartRun);
-
-    const resetPill = document.getElementById('key-r');
-    if (resetPill) resetPill.addEventListener('click', restartRun);
-
-    const togglePill = document.getElementById('key-m');
-    if (togglePill) togglePill.addEventListener('click', toggleKickModel);
-
     // Step 6: Multi-Sector Selection Modal Wiring
     const sectorSelectBtn = document.getElementById('btn-sector-select');
     const sectorModal = document.getElementById('sector-select-modal');
@@ -3249,7 +4713,8 @@
     const closeSectorBtn = document.getElementById('btn-close-sector-modal');
     if (closeSectorBtn && sectorModal) {
       closeSectorBtn.addEventListener('click', () => {
-        sectorModal.classList.add('hidden');
+        if (UI.sub === 'sector') closeSubScreen();
+        else sectorModal.classList.add('hidden');
       });
     }
 
@@ -3257,29 +4722,52 @@
     sectorCards.forEach(card => {
       card.addEventListener('click', () => {
         const idx = parseInt(card.dataset.sector, 10);
+        if (UI.screen === 'title') {
+          // On the title screen the selector only records the choice; PLAY starts the run
+          UI.title.sector = idx;
+          closeSubScreen();
+          refreshTitleMenu();
+          return;
+        }
         loadSector(idx);
         if (sectorModal) sectorModal.classList.add('hidden');
       });
     });
 
-    // Step 6: Victory Modal Actions
-    const nextSectorBtn = document.getElementById('btn-next-sector');
-    if (nextSectorBtn) {
-      nextSectorBtn.addEventListener('click', () => {
-        const victoryModal = document.getElementById('sector-completed-modal');
-        if (victoryModal) victoryModal.classList.add('hidden');
-        const nextIdx = State.CurrentSectorIndex < 3 ? State.CurrentSectorIndex + 1 : 1;
-        loadSector(nextIdx);
+    // Step 8 Sliders & Buttons
+    bindSlider('slider-colossal-scale', Tuning, 'ColossalAsteroidScale', 'val-colossal-scale', 1);
+    bindSlider('slider-incoming-speed', Tuning, 'IncomingAsteroidSpeedCmPerSec', 'val-incoming-speed', 0);
+    bindSlider('slider-push-force', Tuning, 'MaxPushForceKiloNewtons', 'val-push-force', 0);
+    bindSlider('slider-overpower-ratio', Tuning, 'OverpowerRatio', 'val-overpower-ratio', 2);
+
+    const sliderBeltRadius = document.getElementById('slider-belt-radius');
+    const valBeltRadius = document.getElementById('val-belt-radius');
+    if (sliderBeltRadius && valBeltRadius) {
+      sliderBeltRadius.addEventListener('input', () => {
+        const val = parseFloat(sliderBeltRadius.value);
+        Tuning.OuterBeltRadiusCm = val * 100.0;
+        valBeltRadius.textContent = val;
       });
     }
 
-    const restartVictoryBtn = document.getElementById('btn-restart-victory');
-    if (restartVictoryBtn) {
-      restartVictoryBtn.addEventListener('click', () => {
-        const victoryModal = document.getElementById('sector-completed-modal');
-        if (victoryModal) victoryModal.classList.add('hidden');
-        restartRun();
+    const sliderCritDist = document.getElementById('slider-crit-dist');
+    const valCritDist = document.getElementById('val-crit-dist');
+    if (sliderCritDist && valCritDist) {
+      sliderCritDist.addEventListener('input', () => {
+        const val = parseFloat(sliderCritDist.value);
+        Tuning.CriticalDangerDistanceCm = val * 100.0;
+        valCritDist.textContent = val;
       });
+    }
+
+    const btnScreenGauntlet = document.getElementById('btn-screen-gauntlet');
+    if (btnScreenGauntlet) {
+      btnScreenGauntlet.addEventListener('click', () => setScreenMode('Gauntlet'));
+    }
+
+    const btnScreenColossal = document.getElementById('btn-screen-colossal');
+    if (btnScreenColossal) {
+      btnScreenColossal.addEventListener('click', () => setScreenMode('ColossalBelt'));
     }
 
     // Interactive Launch Button (Touch/Mouse)
@@ -3300,5 +4788,10 @@
   // Initialize
   init3D();
   setupTuningDrawer();
+  setupMenus();
+  if (/[?&]dev=1/.test(window.location.search)) setDevOverlay(true);
+  UI.title.sector = State.CurrentSectorIndex;
+  UI.title.mode = Tuning.ActiveScreenMode;
+  showScreen('title');
   animate();
 })();
