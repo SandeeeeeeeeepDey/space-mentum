@@ -905,144 +905,6 @@ html, body {
   100% { transform: scale(1.05); opacity: 1; }
 }
 
-/* 3D Dynamic Aim Crosshair */
-.aim-crosshair-3d {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  transition: transform 0.05s ease-out;
-}
-
-.crosshair-bracket {
-  font-family: var(--font-mono);
-  font-size: 26px;
-  font-weight: 300;
-  color: rgba(0, 240, 255, 0.7);
-  text-shadow: 0 0 10px rgba(0, 240, 255, 0.8);
-}
-
-.crosshair-dot-ring {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 1.5px dashed rgba(0, 240, 255, 0.85);
-  animation: reticleSpin 8s linear infinite;
-}
-
-/* Cybernetic Kinetic Lock-On Target HUD */
-.kinetic-target-reticle {
-  position: absolute;
-  pointer-events: none;
-  z-index: 110;
-  transform: translate(-50%, -50%);
-  transition: transform 0.08s ease-out;
-}
-
-.reticle-box {
-  width: 110px;
-  height: 110px;
-  position: relative;
-  margin: 0 auto;
-}
-
-.reticle-corner {
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  border-color: #00f0ff;
-  border-style: solid;
-}
-
-.reticle-corner.tl {
-  top: 0; left: 0;
-  border-width: 2.5px 0 0 2.5px;
-}
-
-.reticle-corner.tr {
-  top: 0; right: 0;
-  border-width: 2.5px 2.5px 0 0;
-}
-
-.reticle-corner.bl {
-  bottom: 0; left: 0;
-  border-width: 0 0 2.5px 2.5px;
-}
-
-.reticle-corner.br {
-  bottom: 0; right: 0;
-  border-width: 0 2.5px 2.5px 0;
-}
-
-.reticle-rot-ring {
-  position: absolute;
-  top: 15px; left: 15px;
-  width: 80px; height: 80px;
-  border-radius: 50%;
-  border: 1.5px dotted rgba(0, 240, 255, 0.6);
-  animation: reticleSpin 6s linear infinite;
-}
-
-.reticle-center-marker {
-  position: absolute;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: #00f0ff;
-  box-shadow: 0 0 8px #00f0ff;
-}
-
-@keyframes reticleSpin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.kinetic-target-reticle.critical .reticle-corner,
-.kinetic-target-reticle.critical .reticle-center-marker {
-  border-color: #ef4444 !important;
-  background-color: #ef4444 !important;
-  box-shadow: 0 0 16px #ef4444 !important;
-}
-
-.kinetic-target-reticle.critical .reticle-rot-ring {
-  border-color: rgba(239, 68, 68, 0.8) !important;
-  animation-duration: 1.5s !important;
-}
-
-/* Compact range / time-to-impact line under the lock box (Colossal mode) */
-.target-line {
-  margin-top: 8px;
-  text-align: center;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.9);
-  text-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
-}
-
-.target-too-close {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 1px 6px;
-  border-radius: 3px;
-  background: rgba(244, 63, 94, 0.25);
-  border: 1px solid rgba(244, 63, 94, 0.7);
-  color: #fda4af;
-  animation: dilemmaFlash 0.3s infinite alternate;
-}
-
-@keyframes dilemmaFlash {
-  0% { opacity: 0.7; }
-  100% { opacity: 1; }
-}
-
 .kinetic-card {
   border-color: rgba(245, 158, 11, 0.35) !important;
 }
@@ -1694,8 +1556,6 @@ html, body {
 
 /* Title screen hides the in-flight HUD; the live scene stays visible behind the scrim */
 body[data-screen="title"] #game-hud,
-body[data-screen="title"] #aim-crosshair-3d,
-body[data-screen="title"] #kinetic-target-reticle,
 body[data-screen="title"] .center-crosshair { display: none; }
 
 /* Results screens: crash / void / victory. Same scrim as the menus; card fades + scales in
@@ -1763,8 +1623,6 @@ body[data-screen="title"] .center-crosshair { display: none; }
 
 /* The in-flight HUD steps aside while a results card is up */
 body[data-screen="results"] #game-hud,
-body[data-screen="results"] #aim-crosshair-3d,
-body[data-screen="results"] #kinetic-target-reticle,
 body[data-screen="results"] .center-crosshair { opacity: 0; transition: opacity 0.25s ease-out; }
 
 .results-card .pb-tag { color: var(--color-gold); }

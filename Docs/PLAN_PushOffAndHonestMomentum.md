@@ -132,7 +132,7 @@ One Sonnet session should fit (this is much smaller than the HUD plan). If conte
 
 - [x] Phase 1 — Honest momentum (§2) — notes: LateralVelocity, kick model, damping, kickArrow, M hotkey removed; spin release is now stopSpin() (no Δv); Colossal crash uses relative speed. `slider-alpha`/`ImpulseEfficiencyAlpha` kept until Phase 3 (old Colossal push still uses it). Not play-tested in browser (node -c only).
 - [x] Phase 2 — Push-off in corridor (§3) — notes: findPushAnchor/executePushOff/release buffer/whiff/rim highlight/reach ring/mace snap + 5 dev sliders; doom reach = PushReachCm; ReachToleranceCm and KineticChargeRatePerSec removed. Corridor SPACE-in-Running pushes; Colossal still old lock-on path (Phase 3). Not play-tested in browser (node -c only).
-- [ ] Phase 3 — Colossal uses push-off (§4) — notes:
+- [x] Phase 3 — Colossal uses push-off (§4) — notes: lock-on/mouse-aim/F/click/flux line/reticle/crosshair + CSS/markup removed; Colossal reuses findPushAnchor/executePushOff (rock recoils by massKg); overpower is emergent (closing speed vs ColossalCrashSpeedCmPerSec: crash or bump); rose rim = TOO CLOSE; alpha/push-force/crit-dist/overpower sliders removed, crash-speed slider added. Not play-tested in browser (node -c only).
 - [ ] Phase 4 — Teaching + docs + dist (§5, §6) — notes:
 
 ## 8. Acceptance

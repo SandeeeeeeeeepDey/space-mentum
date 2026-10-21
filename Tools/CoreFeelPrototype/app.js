@@ -42,7 +42,6 @@
 
     // FMomentumTransferTuning
     AstronautMassKg: 160.0, // Default 1:4 mass ratio against 40 kg mace
-    ImpulseEfficiencyAlpha: 0.65,
 
     // FForwardDriftTuning
     ForwardSpeedCmPerSec: 3000.0, // 108 km/h sacred forward drift (30 m/s)
@@ -70,9 +69,7 @@
     ColossalAsteroidScale: 1.0,
     OuterBeltRadiusCm: 35000.0, // 350 meters wide outside view
     IncomingAsteroidSpeedCmPerSec: 1600.0,
-    MaxPushForceKiloNewtons: 50.0,
-    CriticalDangerDistanceCm: 1800.0, // 18m danger threshold
-    OverpowerRatio: 1.35,
+    ColossalCrashSpeedCmPerSec: 900.0, // closing speed above this = crash, below = bump (OVERPOWERED)
 
     // One-Button Push-Off (hold SPACE, release near a rock)
     PushReachCm: 650.0,            // body to rock SURFACE
@@ -287,18 +284,12 @@
     bBlindMath: true,
     bShowGizmos: false,
 
-    // Step 8: Kinetic Aiming, Locking & Push State
-    KineticTarget: null,
-    CandidateTarget: null,
-    KineticLockStatus: 'NoTarget',
+    // Step 8: Push State
     KineticPushCharge: 0.0,
     bIsChargingKineticPush: false,
     PushAnchor: null,
     PushBuffer: null,    // { until, charge } armed by an early release
     MaceSnap: null,      // { targetRad, remaining } visual arm reach on push-off
-    AimScreenCoords: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
-    AimNormalized: { x: 0, y: 0 },
-    AimDirectionWorld: new THREE.Vector3(1, 0, 0),
   };
 
   // --- Held Input Flags ---
@@ -547,26 +538,6 @@
     gain.connect(ctx.destination);
     osc.start(now);
     osc.stop(now + 0.06);
-  }
-
-  function playTargetLockBeep(isCritical) {
-    const ctx = getAudioContext();
-    if (!ctx) return;
-    const now = ctx.currentTime;
-
-    const freqs = isCritical ? [440, 220, 110] : [780, 1180];
-    freqs.forEach((freq, idx) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = isCritical ? 'sawtooth' : 'sine';
-      osc.frequency.setValueAtTime(freq, now + idx * 0.05);
-      gain.gain.setValueAtTime((isCritical ? 0.35 : 0.22) * Tuning.AudioMasterVolume, now + idx * 0.05);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.05 + 0.08);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now + idx * 0.05);
-      osc.stop(now + idx * 0.05 + 0.08);
-    });
   }
 
   function playKineticPushBlastSound(forceKN) {
@@ -1040,7 +1011,6 @@
       State.KineticPushCharge = 0.0;
       State.bIsChargingKineticPush = false;
       clearPushState();
-      unlockKineticTarget();
       clearToasts();
       State.ProximityAlarm.threatRatio = 0.0;
       State.ProximityAlarm.nearestPos = null;
@@ -1657,14 +1627,11 @@
   let exitPortalGroup = null, exitPortalTitaniumRing = null, exitPortalAccretionDisk = null, exitPortalEventHorizon = null, exitPortalLight = null;
   let milestoneGateGroups = [];
 
-  // Step 8: Colossal Asteroid Belt, Multi-Angle Hazards & Kinetic Flux Beam Entities
+  // Step 8: Colossal Asteroid Belt & Multi-Angle Hazards
   let colossalBeltGroup = null;
   let colossalBackgroundAsteroids = [];
   let colossalIncomingAsteroids = [];
-  let kineticFluxLine = null;
   let kineticShockwaveMesh = null;
-  let aimRaycaster = new THREE.Raycaster();
-  let mouseNormalized = new THREE.Vector2(0, 0);
   let colossalSpawnTimer = 0;
 
   function init3D() {
@@ -1937,22 +1904,6 @@
     trajectoryLine.visible = false;
     scene.add(trajectoryLine);
 
-    // Kinetic Flux Beam Linking Astronaut to Locked Asteroid
-    const fluxGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, 0)
-    ]);
-    const fluxMat = new THREE.LineBasicMaterial({
-      color: 0x00f0ff,
-      linewidth: 3.5,
-      transparent: true,
-      opacity: 0.9,
-      blending: THREE.AdditiveBlending
-    });
-    kineticFluxLine = new THREE.Line(fluxGeo, fluxMat);
-    kineticFluxLine.visible = false;
-    scene.add(kineticFluxLine);
-
     // Kinetic Repulsion Shockwave Visual Mesh
     const shockwaveGeo = new THREE.TorusGeometry(80, 8, 16, 48);
     const shockwaveMat = new THREE.MeshBasicMaterial({
@@ -1970,7 +1921,6 @@
     loadSector(1);
 
     window.addEventListener('resize', onWindowResize);
-    window.addEventListener('mousemove', onMouseMoveAim);
   }
 
   // --- Starting Asteroid Celestial Anchor (§1.4) ---
@@ -2300,10 +2250,6 @@
     }
     colossalBackgroundAsteroids = [];
     colossalIncomingAsteroids = [];
-    State.KineticTarget = null;
-    State.CandidateTarget = null;
-    State.KineticLockStatus = 'NoTarget';
-    if (kineticFluxLine) kineticFluxLine.visible = false;
   }
 
   // --- Step 8: Colossal Asteroids, Belt Vista & Kinetic Push Mechanics ---
@@ -2444,25 +2390,7 @@
       spawnIncomingColossalAsteroid(4500 + i * 2800);
     }
 
-    // 3. Kinetic Flux Line Mesh (Visual link between player and target)
-    if (!kineticFluxLine) {
-      const lineGeo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(0, 0, 0),
-        new THREE.Vector3(0, 0, 100)
-      ]);
-      const lineMat = new THREE.LineBasicMaterial({
-        color: 0x00f0ff,
-        linewidth: 3,
-        transparent: true,
-        opacity: 0.85,
-        blending: THREE.AdditiveBlending
-      });
-      kineticFluxLine = new THREE.Line(lineGeo, lineMat);
-      kineticFluxLine.visible = false;
-      scene.add(kineticFluxLine);
-    }
-
-    // 4. Kinetic Shockwave Ring Mesh
+    // 3. Kinetic Shockwave Ring Mesh
     if (!kineticShockwaveMesh) {
       const ringGeo = new THREE.RingGeometry(10, 30, 32);
       const ringMat = new THREE.MeshBasicMaterial({
@@ -2517,15 +2445,38 @@
           ast.velocity.y - State.CoMVelocity.y,
           ast.velocity.z - State.CoMVelocity.z
         );
-        triggerKineticCrash({ name: ast.name, isAsteroid: true }, relSpeed);
-        return;
+        // Contact normal (rock -> player) and closing speed along it
+        const n = new THREE.Vector3().subVectors(playerPos, ast.mesh.position);
+        if (n.lengthSq() < 1e-6) n.set(-1, 0, 0);
+        n.normalize();
+        const closing = -((State.CoMVelocity.x - ast.velocity.x) * n.x
+                        + (State.CoMVelocity.y - ast.velocity.y) * n.y
+                        + (State.CoMVelocity.z - ast.velocity.z) * n.z);
+
+        if (closing > Tuning.ColossalCrashSpeedCmPerSec) {
+          triggerKineticCrash({ name: ast.name, isAsteroid: true }, relSpeed);
+          return;
+        }
+
+        if (closing > 1.0) {
+          // Bump: the rock pushes you. Match its velocity along the contact normal, then separate.
+          State.CoMVelocity.x += n.x * closing;
+          State.CoMVelocity.y += n.y * closing;
+          State.CoMVelocity.z += n.z * closing;
+          const sep = collisionThreshold - distToPlayer + 5.0;
+          State.CoMPosition.x += n.x * sep;
+          State.CoMPosition.y += n.y * sep;
+          State.CoMPosition.z += n.z * sep;
+
+          playAsteroidOverpoweredSound();
+          triggerAsteroidOverpowerFlash();
+          State.CameraTrauma = 1.0;
+          spawnKineticSparks(playerPos, 40);
+        }
       }
 
       // Despawn if far behind player or deflected far out
       if (ast.mesh.position.x < State.CoMPosition.x - 6000 || ast.mesh.position.length() > 90000) {
-        if (State.KineticTarget === ast) {
-          unlockKineticTarget();
-        }
         colossalBeltGroup.remove(ast.mesh);
         if (ast.mesh.geometry) ast.mesh.geometry.dispose();
         if (ast.mesh.material) ast.mesh.material.dispose();
@@ -2548,137 +2499,6 @@
         kineticShockwaveMesh.visible = false;
       }
     }
-  }
-
-  function updateKineticTargetingAndAim() {
-    const playerPos = new THREE.Vector3(
-      State.CoMPosition.x,
-      State.CoMPosition.y + State.InternalDisplacement.y,
-      State.CoMPosition.z + State.InternalDisplacement.z
-    );
-
-    const reticleEl = document.getElementById('kinetic-target-reticle');
-    const dilemmaEl = document.getElementById('target-proximity-dilemma');
-    const rangeEl = document.getElementById('target-range');
-    const ttiEl = document.getElementById('target-tti');
-
-    aimRaycaster.setFromCamera(mouseNormalized, camera);
-
-    if (State.KineticLockStatus !== 'Locked') {
-      let bestCandidate = null;
-      let minAngularDist = 0.45; // ~25 deg cone
-
-      for (const ast of colossalIncomingAsteroids) {
-        if (ast.destroyed) continue;
-        const toAst = new THREE.Vector3().subVectors(ast.mesh.position, camera.position);
-        const dist = toAst.length();
-        if (dist > 30000 || toAst.x < 0) continue;
-
-        const dirToAst = toAst.normalize();
-        const rayDir = aimRaycaster.ray.direction;
-        const angle = rayDir.angleTo(dirToAst);
-
-        if (angle < minAngularDist) {
-          minAngularDist = angle;
-          bestCandidate = ast;
-        }
-      }
-
-      State.CandidateTarget = bestCandidate;
-      if (reticleEl) reticleEl.classList.add('hidden');
-      if (kineticFluxLine) kineticFluxLine.visible = false;
-      return;
-    }
-
-    // We ARE Locked to State.KineticTarget
-    const target = State.KineticTarget;
-    if (!target || target.destroyed || target.mesh.position.x < State.CoMPosition.x - 1500) {
-      unlockKineticTarget();
-      return;
-    }
-
-    const toTarget = new THREE.Vector3().subVectors(target.mesh.position, playerPos);
-    const distCm = toTarget.length();
-    target.rangeCm = distCm;
-
-    const relVel = new THREE.Vector3(
-      target.velocity.x - State.CoMVelocity.x,
-      target.velocity.y - State.CoMVelocity.y,
-      target.velocity.z - State.CoMVelocity.z
-    );
-
-    const unitToTarget = toTarget.clone().normalize();
-    const closingSpeedCms = -relVel.dot(unitToTarget);
-    target.closingSpeedCms = closingSpeedCms;
-
-    const tti = closingSpeedCms > 10.0 ? (distCm / closingSpeedCms) : 99.9;
-    target.ttiSeconds = tti;
-
-    const bIsCritical = distCm <= Tuning.CriticalDangerDistanceCm;
-    target.bIsCritical = bIsCritical;
-
-    const screenPos = target.mesh.position.clone().project(camera);
-
-    if (screenPos.z > 1.0) {
-      if (reticleEl) reticleEl.classList.add('hidden');
-    } else {
-      const screenX = (screenPos.x * 0.5 + 0.5) * window.innerWidth;
-      const screenY = (-(screenPos.y * 0.5) + 0.5) * window.innerHeight;
-
-      if (reticleEl) {
-        reticleEl.style.left = `${screenX}px`;
-        reticleEl.style.top = `${screenY}px`;
-        reticleEl.classList.remove('hidden');
-      }
-
-      if (rangeEl) rangeEl.textContent = `${Math.round(distCm * 0.01)}m`;
-      if (ttiEl) ttiEl.textContent = tti < 99 ? `${tti.toFixed(1)}s` : 'CLEAR';
-
-      // Proximity dilemma: box turns rose + short TOO CLOSE tag
-      if (reticleEl) reticleEl.classList.toggle('critical', bIsCritical);
-      if (dilemmaEl) {
-        dilemmaEl.classList.toggle('hidden', !bIsCritical);
-      }
-    }
-
-    // Update 3D Kinetic Flux Beam
-    if (kineticFluxLine) {
-      kineticFluxLine.visible = true;
-      const linePositions = kineticFluxLine.geometry.attributes.position.array;
-      linePositions[0] = playerPos.x + 25;
-      linePositions[1] = playerPos.y;
-      linePositions[2] = playerPos.z;
-      linePositions[3] = target.mesh.position.x;
-      linePositions[4] = target.mesh.position.y;
-      linePositions[5] = target.mesh.position.z;
-      kineticFluxLine.geometry.attributes.position.needsUpdate = true;
-
-      if (State.bIsChargingKineticPush) {
-        kineticFluxLine.material.color.setHex(bIsCritical ? 0xffb703 : 0x00f0ff);
-        kineticFluxLine.material.opacity = 0.5 + State.KineticPushCharge * 0.5;
-      } else {
-        kineticFluxLine.material.color.setHex(0x00f0ff);
-        kineticFluxLine.material.opacity = 0.45;
-      }
-    }
-  }
-
-  function lockKineticTarget() {
-    if (State.CandidateTarget) {
-      State.KineticTarget = State.CandidateTarget;
-      State.KineticLockStatus = 'Locked';
-      playTargetLockBeep(false);
-      updateHUD();
-    }
-  }
-
-  function unlockKineticTarget() {
-    State.KineticTarget = null;
-    State.KineticLockStatus = 'NoTarget';
-    const reticle = document.getElementById('kinetic-target-reticle');
-    if (reticle) reticle.classList.add('hidden');
-    if (kineticFluxLine) kineticFluxLine.visible = false;
-    updateHUD();
   }
 
   // --- One-Button Push-Off (Newton's third law, no fudge factors) ---
@@ -2716,14 +2536,26 @@
     return best;
   }
 
-  function setPushAnchorHighlight(obs, bOn, charge) {
+  // Closing speed of a movable rock toward the player (cm/s), along the contact normal.
+  function getPushClosingSpeed(obs) {
+    if (!obs.velocity) return 0.0;
+    const body = getPushBodyPos();
+    const n = new THREE.Vector3().subVectors(body, getPushObstacleCenter(obs));
+    if (n.lengthSq() < 1e-6) return 0.0;
+    n.normalize();
+    return -((State.CoMVelocity.x - obs.velocity.x) * n.x
+           + (State.CoMVelocity.y - obs.velocity.y) * n.y
+           + (State.CoMVelocity.z - obs.velocity.z) * n.z);
+  }
+
+  function setPushAnchorHighlight(obs, bOn, charge, bDanger) {
     if (!obs || !obs.mesh || !obs.mesh.material || !obs.mesh.material.emissive) return;
     const mat = obs.mesh.material;
     if (bOn) {
       if (!obs.pushRimSaved) {
         obs.pushRimSaved = { hex: mat.emissive.getHex(), intensity: mat.emissiveIntensity };
       }
-      mat.emissive.setHex(0x00e5ff);
+      mat.emissive.setHex(bDanger ? 0xff3b5c : 0x00e5ff);
       mat.emissiveIntensity = 0.7 + charge * 0.9;
     } else if (obs.pushRimSaved) {
       mat.emissive.setHex(obs.pushRimSaved.hex);
@@ -2781,7 +2613,12 @@
       setPushAnchorHighlight(State.PushAnchor, false, 0);
       State.PushAnchor = wanted;
     }
-    if (State.PushAnchor) setPushAnchorHighlight(State.PushAnchor, true, State.KineticPushCharge);
+    if (State.PushAnchor) {
+      // TOO CLOSE: rose rim when the rock's closing speed exceeds what the current charge can cancel
+      const cancel = Math.max(Tuning.MinPushCharge, State.KineticPushCharge) * Tuning.MaxPushDeltaVCmPerSec;
+      const bDanger = getPushClosingSpeed(State.PushAnchor) - cancel > Tuning.ColossalCrashSpeedCmPerSec;
+      setPushAnchorHighlight(State.PushAnchor, true, State.KineticPushCharge, bDanger);
+    }
 
     // Mace arm visibly reaches for the rock (internal move, ~100 ms)
     if (State.MaceSnap) {
@@ -2825,8 +2662,16 @@
       State.MaceSnap = { targetRad: Math.atan2(latZ, latY), remaining: 0.1 };
     }
 
+    if (anchor.massKg && kineticShockwaveMesh) {
+      kineticShockwaveMesh.position.copy(contact);
+      kineticShockwaveMesh.lookAt(body);
+      kineticShockwaveMesh.scale.set(1, 1, 1);
+      kineticShockwaveMesh.material.opacity = 1.0;
+      kineticShockwaveMesh.visible = true;
+    }
+
     State.StrikeCount++;
-    playKineticPushBlastSound(charge * Tuning.MaxPushForceKiloNewtons);
+    playKineticPushBlastSound(charge * 50.0);
     spawnKineticSparks(contact, Math.round(20 + charge * 35));
     State.CameraTrauma = Math.min(1.0, State.CameraTrauma + 0.15 + charge * 0.45);
     State.TargetFOV = Math.min(106.0, State.CurrentFOV + 4.0 + charge * 10.0);
@@ -2856,94 +2701,6 @@
     src.start(now);
   }
 
-  function startChargingKineticPush() {
-    if (State.RunPhase !== 'Running') return;
-    State.bIsChargingKineticPush = true;
-  }
-
-  function releaseAndDeployKineticPush() {
-    if (!State.bIsChargingKineticPush) return;
-    State.bIsChargingKineticPush = false;
-
-    const charge = Math.max(0.12, State.KineticPushCharge);
-    State.KineticPushCharge = 0.0;
-
-    if (State.KineticLockStatus !== 'Locked' || !State.KineticTarget) {
-      return;
-    }
-
-    const target = State.KineticTarget;
-    const playerPos = new THREE.Vector3(
-      State.CoMPosition.x,
-      State.CoMPosition.y + State.InternalDisplacement.y,
-      State.CoMPosition.z + State.InternalDisplacement.z
-    );
-
-    const toTarget = new THREE.Vector3().subVectors(target.mesh.position, playerPos);
-    const distCm = toTarget.length();
-    const unitPush = toTarget.clone().normalize();
-
-    const forceKN = charge * Tuning.MaxPushForceKiloNewtons;
-    const impulseNs = forceKN * 1000.0 * 0.22;
-
-    // --- PROXIMITY DILEMMA CHECK ---
-    // If closer than critical distance (18m) and push charge < 70%:
-    // "IT WILL PUSH IT" — asteroid's colossal inertia overpowers player repulsion!
-    if (distCm <= Tuning.CriticalDangerDistanceCm && charge < 0.70) {
-      playAsteroidOverpoweredSound();
-      triggerAsteroidOverpowerFlash();
-
-      State.CoMVelocity.x -= 820.0 * Tuning.OverpowerRatio;
-      State.CoMVelocity.y += (Math.random() - 0.5) * 600.0;
-      State.CoMVelocity.z += (Math.random() - 0.5) * 400.0;
-      State.CameraTrauma = 1.0;
-
-      spawnKineticSparks(playerPos, 40);
-      unlockKineticTarget();
-      return;
-    }
-
-    // --- SUCCESSFUL KINETIC PUSH DEFLECTION ---
-    const deltaVTargetCms = (impulseNs / target.massKg) * 100.0;
-    target.velocity.x += unitPush.x * deltaVTargetCms;
-    target.velocity.y += unitPush.y * deltaVTargetCms;
-    target.velocity.z += unitPush.z * deltaVTargetCms;
-
-    target.rotSpeed.x += (Math.random() - 0.5) * 0.25;
-    target.rotSpeed.y += (Math.random() - 0.5) * 0.25;
-
-    const playerMassKg = Tuning.AstronautMassKg + Tuning.MaceMassKg;
-    const deltaVPlayerCms = (impulseNs * Tuning.ImpulseEfficiencyAlpha / playerMassKg) * 100.0;
-
-    State.CoMVelocity.x -= unitPush.x * deltaVPlayerCms * 0.65;
-    State.CoMVelocity.y -= unitPush.y * deltaVPlayerCms;
-    State.CoMVelocity.z -= unitPush.z * deltaVPlayerCms;
-
-    playKineticPushBlastSound(forceKN);
-    triggerPushDeflectionFlash(forceKN);
-    spawnKineticSparks(target.mesh.position, 55);
-
-    if (kineticShockwaveMesh) {
-      kineticShockwaveMesh.position.copy(target.mesh.position);
-      kineticShockwaveMesh.lookAt(playerPos);
-      kineticShockwaveMesh.scale.set(1, 1, 1);
-      kineticShockwaveMesh.material.opacity = 1.0;
-      kineticShockwaveMesh.visible = true;
-    }
-
-    State.CameraTrauma = Math.min(1.0, 0.45 + charge * 0.4);
-    State.StrikeCount++;
-  }
-
-  function triggerPushDeflectionFlash(forceKN) {
-    showToast(`PUSH ${forceKN.toFixed(0)} kN`, 'gold');
-    const container = document.getElementById('canvas-container');
-    if (container) {
-      container.style.filter = 'brightness(1.8) drop-shadow(0 0 45px rgba(0,240,255,0.9))';
-      setTimeout(() => { container.style.filter = 'none'; }, 160);
-    }
-  }
-
   function triggerAsteroidOverpowerFlash() {
     showToast('OVERPOWERED!', 'rose');
     const container = document.getElementById('canvas-container');
@@ -2953,32 +2710,14 @@
     }
   }
 
-  function onMouseMoveAim(e) {
-    mouseNormalized.x = (e.clientX / window.innerWidth) * 2 - 1;
-    mouseNormalized.y = -(e.clientY / window.innerHeight) * 2 + 1;
-
-    const crosshair = document.getElementById('aim-crosshair-3d');
-    if (crosshair && Tuning.ActiveScreenMode === 'ColossalBelt') {
-      crosshair.style.left = `${e.clientX}px`;
-      crosshair.style.top = `${e.clientY}px`;
-      crosshair.classList.toggle('has-candidate', !!State.CandidateTarget);
-    }
-  }
-
   function setScreenMode(mode) {
     Tuning.ActiveScreenMode = mode;
     const btnGauntlet = document.getElementById('btn-screen-gauntlet');
     const btnColossal = document.getElementById('btn-screen-colossal');
-    const aimCrosshair = document.getElementById('aim-crosshair-3d');
-    const kineticCard = document.getElementById('card-kinetic-target');
-    const pushCard = document.getElementById('card-push-force');
 
     if (mode === 'ColossalBelt') {
       if (btnGauntlet) btnGauntlet.classList.remove('active');
       if (btnColossal) btnColossal.classList.add('active');
-      if (aimCrosshair) aimCrosshair.classList.remove('hidden');
-      if (kineticCard) kineticCard.classList.remove('hidden');
-      if (pushCard) pushCard.classList.remove('hidden');
 
       const launchBanner = document.getElementById('launch-guidance-banner');
       if (launchBanner) launchBanner.classList.add('hidden');
@@ -2987,9 +2726,6 @@
     } else {
       if (btnGauntlet) btnGauntlet.classList.add('active');
       if (btnColossal) btnColossal.classList.remove('active');
-      if (aimCrosshair) aimCrosshair.classList.add('hidden');
-      const reticle = document.getElementById('kinetic-target-reticle');
-      if (reticle) reticle.classList.add('hidden');
 
       loadSector(State.CurrentSectorIndex);
     }
@@ -3330,7 +3066,6 @@
 
       if (Tuning.ActiveScreenMode === 'ColossalBelt') {
         updateColossalAsteroidBelt(dt);
-        updateKineticTargetingAndAim();
       }
 
       updateHyperspaceSpeedDust(dt);
@@ -3499,7 +3234,7 @@
     orbitRingMesh.scale.set(1, Tuning.TetherLengthCm / 180.0, Tuning.TetherLengthCm / 180.0);
 
     // 6.5 Push reach ring follows the body while winding up
-    pushReachRing.visible = State.RunPhase === 'Running' && State.bIsChargingKineticPush && Tuning.ActiveScreenMode !== 'ColossalBelt';
+    pushReachRing.visible = State.RunPhase === 'Running' && State.bIsChargingKineticPush;
     if (pushReachRing.visible) {
       pushReachRing.position.set(
         State.CoMPosition.x,
@@ -3668,7 +3403,7 @@
           const canvasX = center + relY * scale;
           const canvasY = center - relX * scale;
 
-          const isLocked = (State.KineticTarget === ast);
+          const isLocked = (State.PushAnchor === ast);
           ctx.strokeStyle = isLocked ? '#f59e0b' : (ast.bIsCritical ? '#ef4444' : '#00f0ff');
           ctx.fillStyle = isLocked ? 'rgba(245,158,11,0.35)' : (ast.bIsCritical ? 'rgba(239,68,68,0.35)' : 'rgba(0,240,255,0.25)');
           ctx.lineWidth = isLocked ? 2.5 : 1.5;
@@ -4185,39 +3920,18 @@
       if (powerDescEl) powerDescEl.textContent = `Tangential strike ready: 40kg mace @ ${Math.round(tanSpeed * 100)} cm/s`;
     }
 
-    // Step 8: Kinetic Target & Push Force Card Updates
-    const targetStatusEl = document.getElementById('stat-target-status');
-    const targetMetricsEl = document.getElementById('stat-target-metrics');
-    if (targetStatusEl && targetMetricsEl) {
-      if (State.KineticLockStatus === 'Locked' && State.KineticTarget) {
-        targetStatusEl.textContent = 'TARGET LOCKED';
-        targetStatusEl.className = 'metric-value highlight-gold';
-        const rangeM = (State.KineticTarget.rangeCm * 0.01).toFixed(1);
-        const ttiS = State.KineticTarget.ttiSeconds < 99 ? State.KineticTarget.ttiSeconds.toFixed(1) + 's' : '---';
-        targetMetricsEl.textContent = `Range: ${rangeM}m | TTI: ${ttiS} | Aim: ${State.KineticTarget.name}`;
-      } else if (State.CandidateTarget) {
-        targetStatusEl.textContent = 'CANDIDATE ACQUIRED';
-        targetStatusEl.className = 'metric-value highlight-cyan';
-        targetMetricsEl.textContent = `Press [F] or Click to Lock: ${State.CandidateTarget.name}`;
-      } else {
-        targetStatusEl.textContent = 'NO TARGET';
-        targetStatusEl.className = 'metric-value';
-        targetMetricsEl.textContent = 'Aim at asteroid to acquire lock';
-      }
-    }
-
     const pushForceEl = document.getElementById('stat-push-force');
     const pushStatusEl = document.getElementById('stat-push-status');
     if (pushForceEl && pushStatusEl) {
       const chargePct = Math.round(State.KineticPushCharge * 100);
-      const forceKN = (State.KineticPushCharge * Tuning.MaxPushForceKiloNewtons).toFixed(1);
-      pushForceEl.textContent = `${forceKN} kN`;
+      const dvCms = Math.round(State.KineticPushCharge * Tuning.MaxPushDeltaVCmPerSec);
+      pushForceEl.textContent = `${chargePct}% (\u0394v ${dvCms} cm/s)`;
       if (State.bIsChargingKineticPush) {
         pushForceEl.className = 'metric-value highlight-gold';
-        pushStatusEl.textContent = `Charging: ${chargePct}% | Release to Fire`;
+        pushStatusEl.textContent = State.PushAnchor ? 'Rock in reach | Release to push off' : 'Winding up | No rock in reach';
       } else {
         pushForceEl.className = 'metric-value highlight-cyan';
-        pushStatusEl.textContent = `Capacitor Ready (Hold SPACE)`;
+        pushStatusEl.textContent = 'Hold SPACE to wind up';
       }
     }
 
@@ -4605,20 +4319,10 @@
     if (key === ' ' || e.code === 'Space') {
       e.preventDefault();
       Input.isSpacePressed = true;
-      if (Tuning.ActiveScreenMode === 'ColossalBelt') {
-        startChargingKineticPush();
-      } else if (State.RunPhase === 'LaunchPushOff') {
+      if (State.RunPhase === 'LaunchPushOff') {
         startChargingPush();
       } else if (State.RunPhase === 'Running' && !e.repeat) {
         startPushCharge();
-      }
-    } else if (key === 'f') {
-      if (Tuning.ActiveScreenMode === 'ColossalBelt') {
-        if (State.KineticLockStatus === 'Locked') {
-          unlockKineticTarget();
-        } else {
-          lockKineticTarget();
-        }
       }
     } else if (key === 'a') {
       Input.isAPressed = true;
@@ -4638,9 +4342,7 @@
       if (UI.screen === 'playing') e.preventDefault();
       Input.isSpacePressed = false;
       if (UI.screen !== 'playing') return;
-      if (Tuning.ActiveScreenMode === 'ColossalBelt') {
-        releaseAndDeployKineticPush();
-      } else if (State.RunPhase === 'LaunchPushOff') {
+      if (State.RunPhase === 'LaunchPushOff') {
         fireLaunchPush();
       } else {
         releasePush();
@@ -4651,24 +4353,6 @@
     } else if (key === 'd') {
       Input.isDPressed = false;
       if (UI.screen === 'playing') evaluateActiveSpin();
-    }
-  });
-
-  window.addEventListener('mousemove', onMouseMoveAim);
-
-  window.addEventListener('mousedown', (e) => {
-    if (UI.screen !== 'playing') return;
-    if (e.target.closest('#dev-overlay') || e.target.closest('.screen-overlay') || e.target.closest('.failure-modal') || e.target.closest('button')) {
-      return;
-    }
-    if (Tuning.ActiveScreenMode === 'ColossalBelt') {
-      if (e.button === 0) {
-        if (State.KineticLockStatus === 'Locked') {
-          unlockKineticTarget();
-        } else {
-          lockKineticTarget();
-        }
-      }
     }
   });
 
@@ -4696,7 +4380,6 @@
     bindSlider('slider-mace-mass', Tuning, 'MaceMassKg', 'val-mace-mass', 0);
     bindSlider('slider-accel', Tuning, 'SpinAccelerationDegPerSec2', 'val-accel', 0);
     bindSlider('slider-max-speed', Tuning, 'MaxAngularSpeedDegPerSec', 'val-max-speed', 0);
-    bindSlider('slider-alpha', Tuning, 'ImpulseEfficiencyAlpha', 'val-alpha', 2);
     bindSlider('slider-push-reach', Tuning, 'PushReachCm', 'val-push-reach', 0);
     bindSlider('slider-push-charge-rate', Tuning, 'PushChargeRatePerSec', 'val-push-charge-rate', 2);
     bindSlider('slider-push-min-charge', Tuning, 'MinPushCharge', 'val-push-min-charge', 2);
@@ -4762,7 +4445,6 @@
         Tuning.MaceMassKg = 40.0;
         Tuning.SpinAccelerationDegPerSec2 = 1440.0;
         Tuning.MaxAngularSpeedDegPerSec = 1080.0;
-        Tuning.ImpulseEfficiencyAlpha = 0.65;
         Tuning.PushReachCm = 650.0;
         Tuning.PushChargeRatePerSec = 0.9;
         Tuning.MinPushCharge = 0.15;
@@ -4791,8 +4473,6 @@
         document.getElementById('val-accel').textContent = '1440';
         document.getElementById('slider-max-speed').value = 1080;
         document.getElementById('val-max-speed').textContent = '1080';
-        document.getElementById('slider-alpha').value = 0.65;
-        document.getElementById('val-alpha').textContent = '0.65';
         document.getElementById('slider-fov-dilation').value = 25;
         document.getElementById('val-fov-dilation').textContent = '25';
         document.getElementById('slider-dutch-roll').value = 4.5;
@@ -4811,9 +4491,7 @@
         Tuning.ColossalAsteroidScale = 1.0;
         Tuning.OuterBeltRadiusCm = 35000.0;
         Tuning.IncomingAsteroidSpeedCmPerSec = 1600.0;
-        Tuning.MaxPushForceKiloNewtons = 50.0;
-        Tuning.CriticalDangerDistanceCm = 1800.0;
-        Tuning.OverpowerRatio = 1.35;
+        Tuning.ColossalCrashSpeedCmPerSec = 900.0;
 
         const sScale = document.getElementById('slider-colossal-scale');
         if (sScale) sScale.value = 1.0;
@@ -4830,20 +4508,10 @@
         const vSpd = document.getElementById('val-incoming-speed');
         if (vSpd) vSpd.textContent = '1600';
 
-        const sPush = document.getElementById('slider-push-force');
-        if (sPush) sPush.value = 50;
-        const vPush = document.getElementById('val-push-force');
-        if (vPush) vPush.textContent = '50';
-
-        const sCrit = document.getElementById('slider-crit-dist');
-        if (sCrit) sCrit.value = 18;
-        const vCrit = document.getElementById('val-crit-dist');
-        if (vCrit) vCrit.textContent = '18';
-
-        const sOver = document.getElementById('slider-overpower-ratio');
-        if (sOver) sOver.value = 1.35;
-        const vOver = document.getElementById('val-overpower-ratio');
-        if (vOver) vOver.textContent = '1.35';
+        const sCrash = document.getElementById('slider-crash-speed');
+        if (sCrash) sCrash.value = 900;
+        const vCrash = document.getElementById('val-crash-speed');
+        if (vCrash) vCrash.textContent = '900';
       });
     }
 
@@ -4901,8 +4569,7 @@
     // Step 8 Sliders & Buttons
     bindSlider('slider-colossal-scale', Tuning, 'ColossalAsteroidScale', 'val-colossal-scale', 1);
     bindSlider('slider-incoming-speed', Tuning, 'IncomingAsteroidSpeedCmPerSec', 'val-incoming-speed', 0);
-    bindSlider('slider-push-force', Tuning, 'MaxPushForceKiloNewtons', 'val-push-force', 0);
-    bindSlider('slider-overpower-ratio', Tuning, 'OverpowerRatio', 'val-overpower-ratio', 2);
+    bindSlider('slider-crash-speed', Tuning, 'ColossalCrashSpeedCmPerSec', 'val-crash-speed', 0);
 
     const sliderBeltRadius = document.getElementById('slider-belt-radius');
     const valBeltRadius = document.getElementById('val-belt-radius');
@@ -4911,16 +4578,6 @@
         const val = parseFloat(sliderBeltRadius.value);
         Tuning.OuterBeltRadiusCm = val * 100.0;
         valBeltRadius.textContent = val;
-      });
-    }
-
-    const sliderCritDist = document.getElementById('slider-crit-dist');
-    const valCritDist = document.getElementById('val-crit-dist');
-    if (sliderCritDist && valCritDist) {
-      sliderCritDist.addEventListener('input', () => {
-        const val = parseFloat(sliderCritDist.value);
-        Tuning.CriticalDangerDistanceCm = val * 100.0;
-        valCritDist.textContent = val;
       });
     }
 

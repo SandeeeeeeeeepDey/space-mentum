@@ -144,15 +144,10 @@
             <div id="stat-score" class="metric-value highlight-gold">0 PTS</div>
             <div id="stat-score-sub" class="metric-sub">STREAK: 0x | GRADE: S</div>
           </div>
-          <div class="metric-card kinetic-card" id="card-kinetic-target">
-            <div class="metric-label">KINETIC TARGET LOCK [F]</div>
-            <div id="stat-target-status" class="metric-value highlight-cyan">NO TARGET</div>
-            <div id="stat-target-metrics" class="metric-sub">Aim at asteroid to acquire</div>
-          </div>
           <div class="metric-card kinetic-card" id="card-push-force">
-            <div class="metric-label">KINETIC PUSH [SPACE]</div>
-            <div id="stat-push-force" class="metric-value highlight-gold">0.0 kN</div>
-            <div id="stat-push-status" class="metric-sub">Capacitor: 0% Ready</div>
+            <div class="metric-label">PUSH CHARGE [SPACE]</div>
+            <div id="stat-push-force" class="metric-value highlight-gold">0%</div>
+            <div id="stat-push-status" class="metric-sub">Hold SPACE to wind up</div>
           </div>
         </div>
       </header>
@@ -248,11 +243,6 @@
           <input type="range" id="slider-max-speed" min="360" max="2160" value="1080" step="60">
         </div>
 
-        <div class="slider-group">
-          <label>Impulse Efficiency (α): <span id="val-alpha">0.65</span></label>
-          <input type="range" id="slider-alpha" min="0.1" max="1.5" value="0.65" step="0.05">
-        </div>
-
         <div class="drawer-section-divider">PUSH-OFF</div>
 
         <div class="slider-group">
@@ -337,18 +327,8 @@
         </div>
 
         <div class="slider-group">
-          <label>Max Kinetic Push Force: <span id="val-push-force">50</span> kN</label>
-          <input type="range" id="slider-push-force" min="10" max="100" value="50" step="5">
-        </div>
-
-        <div class="slider-group">
-          <label>Critical Danger Distance: <span id="val-crit-dist">18</span> m</label>
-          <input type="range" id="slider-crit-dist" min="8" max="35" value="18" step="1">
-        </div>
-
-        <div class="slider-group">
-          <label>Asteroid Overpower Ratio: <span id="val-overpower-ratio">1.35</span>x</label>
-          <input type="range" id="slider-overpower-ratio" min="0.5" max="3.0" value="1.35" step="0.05">
+          <label>Colossal Crash Speed: <span id="val-crash-speed">900</span> cm/s</label>
+          <input type="range" id="slider-crash-speed" min="300" max="2000" value="900" step="50">
         </div>
 
         <div class="button-row">
@@ -358,29 +338,6 @@
         </div>
       </div>
     </aside>
-    </div>
-
-    <!-- Cybernetic 3D Aiming Crosshair -->
-    <div id="aim-crosshair-3d" class="aim-crosshair-3d hidden">
-      <div class="crosshair-bracket left">[</div>
-      <div class="crosshair-dot-ring"></div>
-      <div class="crosshair-bracket right">]</div>
-    </div>
-
-    <!-- Cybernetic Kinetic Lock-On Target Telemetry HUD -->
-    <div id="kinetic-target-reticle" class="kinetic-target-reticle hidden">
-      <div class="reticle-box">
-        <div class="reticle-corner tl"></div>
-        <div class="reticle-corner tr"></div>
-        <div class="reticle-corner bl"></div>
-        <div class="reticle-corner br"></div>
-        <div class="reticle-rot-ring"></div>
-        <div class="reticle-center-marker"></div>
-      </div>
-      <div class="target-line hud-label">
-        <span id="target-range">48m</span> &middot; <span id="target-tti">2.1s</span>
-        <span id="target-proximity-dilemma" class="target-too-close hidden">TOO CLOSE</span>
-      </div>
     </div>
 
     <!-- Game flow screens (Creator: "the interface doesnt look vary playagle and game like right now.") -->
