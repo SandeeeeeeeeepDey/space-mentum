@@ -50,7 +50,6 @@
     // Doom Detection & Lookahead Bounds (Creator Mandate)
     MinLookaheadSeconds: 13.0,
     MaxLookaheadSeconds: 40.0,
-    ReachToleranceCm: 80.0,
     StallSpeedThresholdCmPerSec: 100.0,
 
     // Step 5: Camera, VFX & Dynamic Audio Tuning
@@ -74,7 +73,13 @@
     MaxPushForceKiloNewtons: 50.0,
     CriticalDangerDistanceCm: 1800.0, // 18m danger threshold
     OverpowerRatio: 1.35,
-    KineticChargeRatePerSec: 0.95,
+
+    // One-Button Push-Off (hold SPACE, release near a rock)
+    PushReachCm: 650.0,            // body to rock SURFACE
+    PushChargeRatePerSec: 0.9,     // ~1.1 s to full charge
+    MinPushCharge: 0.15,           // a tap still shoves
+    MaxPushDeltaVCmPerSec: 1400.0, // player dv at full charge vs an immovable rock
+    PushReleaseBufferMs: 150.0,    // early release still fires if a rock arrives in this window
   };
 
   // --- Multi-Sector Celestial Catalog (Step 6) ---
@@ -288,6 +293,9 @@
     KineticLockStatus: 'NoTarget',
     KineticPushCharge: 0.0,
     bIsChargingKineticPush: false,
+    PushAnchor: null,
+    PushBuffer: null,    // { until, charge } armed by an early release
+    MaceSnap: null,      // { targetRad, remaining } visual arm reach on push-off
     AimScreenCoords: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
     AimNormalized: { x: 0, y: 0 },
     AimDirectionWorld: new THREE.Vector3(1, 0, 0),
@@ -1031,6 +1039,7 @@
       State.ActiveFlightTimeSeconds = 0.0;
       State.KineticPushCharge = 0.0;
       State.bIsChargingKineticPush = false;
+      clearPushState();
       unlockKineticTarget();
       clearToasts();
       State.ProximityAlarm.threatRatio = 0.0;
@@ -1067,6 +1076,9 @@
     State.LaunchAimAngleDeg = 0.0;
     State.LaunchPushCharge = 0.0;
     State.bIsChargingPush = false;
+    State.bIsChargingKineticPush = false;
+    State.KineticPushCharge = 0.0;
+    clearPushState();
 
     State.CoMPosition.x = 0.0;
     State.CoMPosition.y = 0.0;
@@ -1164,7 +1176,7 @@
 
     // Step 8: Kinetic Push Charging Accumulator
     if (State.bIsChargingKineticPush) {
-      State.KineticPushCharge = Math.min(1.0, State.KineticPushCharge + dt * Tuning.KineticChargeRatePerSec);
+      State.KineticPushCharge = Math.min(1.0, State.KineticPushCharge + dt * Tuning.PushChargeRatePerSec);
       playKineticChargeSound(State.KineticPushCharge);
     }
 
@@ -1190,6 +1202,9 @@
 
     // 2. Continuous Audio Pitch Scaling (Metasound mirror)
     updateContinuousSpinAudio(State.AngularVelocityRadPerSec);
+
+    // 2.5 One-button push-off: anchor tracking, release buffer, arm reach
+    updatePushOff(dt);
 
     // 3. Angle Integration
     if (Math.abs(State.AngularVelocityRadPerSec) > 0.0001) {
@@ -1566,8 +1581,8 @@
 
   // --- Background 13s–40s Void Doom Trajectory Evaluator ---
   function evaluateBackgroundDoomLookahead() {
-    const totalMass = Tuning.AstronautMassKg + Tuning.MaceMassKg;
-    const maxReachCm = (Tuning.AstronautMassKg / totalMass) * Tuning.TetherLengthCm + Tuning.ReachToleranceCm;
+    // An obstacle is a usable anchor if it will pass within push reach (rock surface)
+    const maxReachCm = Tuning.PushReachCm;
 
     const totalFwdSpeed = State.CoMVelocity.x;
     if (totalFwdSpeed < Tuning.StallSpeedThresholdCmPerSec) {
@@ -1621,7 +1636,7 @@
   // --- Three.js Scene Setup & Visual Entities ---
   let scene, camera, renderer;
   let ambientLight, keyCosmicLight, rimCosmicLight;
-  let astronautAvatar, orbitRingMesh, tangentArrow, trajectoryLine;
+  let astronautAvatar, orbitRingMesh, pushReachRing, tangentArrow, trajectoryLine;
   let starsParticles, tunnelRings = [];
   let denseObstacles = [];
 
@@ -1898,6 +1913,18 @@
     const ringMat = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.35 });
     orbitRingMesh = new THREE.Line(ringGeo, ringMat);
     scene.add(orbitRingMesh);
+
+    // Push reach ring (range cue, shown only while SPACE is held; not a trajectory line)
+    const reachPoints = [];
+    for (let i = 0; i < 96; i++) {
+      const theta = (i / 96) * Math.PI * 2;
+      reachPoints.push(new THREE.Vector3(0, Math.cos(theta), Math.sin(theta)));
+    }
+    const reachGeo = new THREE.BufferGeometry().setFromPoints(reachPoints);
+    const reachMat = new THREE.LineBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.12, depthWrite: false });
+    pushReachRing = new THREE.LineLoop(reachGeo, reachMat);
+    pushReachRing.visible = false;
+    scene.add(pushReachRing);
 
     // Debug Arrows
     tangentArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(), 50, 0xffe600, 15, 8);
@@ -2654,6 +2681,181 @@
     updateHUD();
   }
 
+  // --- One-Button Push-Off (Newton's third law, no fudge factors) ---
+  function getPushBodyPos() {
+    return new THREE.Vector3(
+      State.CoMPosition.x,
+      State.CoMPosition.y + State.InternalDisplacement.y,
+      State.CoMPosition.z + State.InternalDisplacement.z
+    );
+  }
+
+  function getPushCandidates() {
+    return Tuning.ActiveScreenMode === 'ColossalBelt' ? colossalIncomingAsteroids : denseObstacles;
+  }
+
+  function getPushObstacleCenter(obs) {
+    return obs.position || obs.mesh.position;
+  }
+
+  // Obstacle whose surface is nearest the body within PushReachCm, or null.
+  function findPushAnchor() {
+    const body = getPushBodyPos();
+    let best = null;
+    let bestDist = Tuning.PushReachCm;
+    for (const obs of getPushCandidates()) {
+      if (obs.destroyed) continue;
+      const c = getPushObstacleCenter(obs);
+      if (Math.abs(c.x - body.x) > Tuning.PushReachCm + obs.radius) continue;
+      const d = c.distanceTo(body) - obs.radius;
+      if (d <= bestDist) {
+        bestDist = d;
+        best = obs;
+      }
+    }
+    return best;
+  }
+
+  function setPushAnchorHighlight(obs, bOn, charge) {
+    if (!obs || !obs.mesh || !obs.mesh.material || !obs.mesh.material.emissive) return;
+    const mat = obs.mesh.material;
+    if (bOn) {
+      if (!obs.pushRimSaved) {
+        obs.pushRimSaved = { hex: mat.emissive.getHex(), intensity: mat.emissiveIntensity };
+      }
+      mat.emissive.setHex(0x00e5ff);
+      mat.emissiveIntensity = 0.7 + charge * 0.9;
+    } else if (obs.pushRimSaved) {
+      mat.emissive.setHex(obs.pushRimSaved.hex);
+      mat.emissiveIntensity = obs.pushRimSaved.intensity;
+      obs.pushRimSaved = null;
+    }
+  }
+
+  function clearPushState() {
+    setPushAnchorHighlight(State.PushAnchor, false, 0);
+    State.PushAnchor = null;
+    State.PushBuffer = null;
+    State.MaceSnap = null;
+  }
+
+  function startPushCharge() {
+    if (State.RunPhase !== 'Running') return;
+    State.bIsChargingKineticPush = true;
+    State.KineticPushCharge = 0.0;
+    State.PushBuffer = null;
+  }
+
+  function releasePush() {
+    if (!State.bIsChargingKineticPush) return;
+    State.bIsChargingKineticPush = false;
+    const charge = Math.max(Tuning.MinPushCharge, State.KineticPushCharge);
+    State.KineticPushCharge = 0.0;
+    if (State.RunPhase !== 'Running') return;
+
+    const anchor = findPushAnchor();
+    if (anchor) {
+      executePushOff(anchor, charge);
+    } else {
+      State.PushBuffer = { until: performance.now() + Tuning.PushReleaseBufferMs, charge: charge };
+    }
+  }
+
+  function updatePushOff(dt) {
+    // Buffered early release: fire when a rock enters reach, otherwise whiff.
+    if (State.PushBuffer) {
+      const anchor = findPushAnchor();
+      if (anchor) {
+        const charge = State.PushBuffer.charge;
+        State.PushBuffer = null;
+        executePushOff(anchor, charge);
+      } else if (performance.now() > State.PushBuffer.until) {
+        State.PushBuffer = null;
+        playPushWhiffSound();
+      }
+    }
+
+    // In-reach highlight while winding up
+    const wanted = State.bIsChargingKineticPush ? findPushAnchor() : null;
+    if (wanted !== State.PushAnchor) {
+      setPushAnchorHighlight(State.PushAnchor, false, 0);
+      State.PushAnchor = wanted;
+    }
+    if (State.PushAnchor) setPushAnchorHighlight(State.PushAnchor, true, State.KineticPushCharge);
+
+    // Mace arm visibly reaches for the rock (internal move, ~100 ms)
+    if (State.MaceSnap) {
+      const snap = State.MaceSnap;
+      let delta = snap.targetRad - State.OrbitAngleRad;
+      delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+      const step = Math.min(1.0, dt / Math.max(dt, snap.remaining));
+      State.OrbitAngleRad += delta * step;
+      State.OrbitAngleRad = ((State.OrbitAngleRad % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      snap.remaining -= dt;
+      if (snap.remaining <= 0) State.MaceSnap = null;
+    }
+  }
+
+  function executePushOff(anchor, charge) {
+    const body = getPushBodyPos();
+    const center = getPushObstacleCenter(anchor);
+    const n = new THREE.Vector3().subVectors(body, center);
+    if (n.lengthSq() < 1e-6) n.set(-1, 0, 0);
+    n.normalize();
+
+    const playerMassKg = Tuning.AstronautMassKg + Tuning.MaceMassKg;
+    const impulse = charge * Tuning.MaxPushDeltaVCmPerSec * playerMassKg; // kg*cm/s
+
+    State.CoMVelocity.x += n.x * impulse / playerMassKg;
+    State.CoMVelocity.y += n.y * impulse / playerMassKg;
+    State.CoMVelocity.z += n.z * impulse / playerMassKg;
+
+    if (anchor.massKg && anchor.velocity) {
+      anchor.velocity.x -= n.x * impulse / anchor.massKg;
+      anchor.velocity.y -= n.y * impulse / anchor.massKg;
+      anchor.velocity.z -= n.z * impulse / anchor.massKg;
+    }
+
+    const contact = center.clone().addScaledVector(n, anchor.radius);
+
+    // The arm reaches toward the rock's lateral direction
+    const latY = center.y - State.CoMPosition.y;
+    const latZ = center.z - State.CoMPosition.z;
+    if (Math.hypot(latY, latZ) > 1.0) {
+      State.MaceSnap = { targetRad: Math.atan2(latZ, latY), remaining: 0.1 };
+    }
+
+    State.StrikeCount++;
+    playKineticPushBlastSound(charge * Tuning.MaxPushForceKiloNewtons);
+    spawnKineticSparks(contact, Math.round(20 + charge * 35));
+    State.CameraTrauma = Math.min(1.0, State.CameraTrauma + 0.15 + charge * 0.45);
+    State.TargetFOV = Math.min(106.0, State.CurrentFOV + 4.0 + charge * 10.0);
+    showToast('PUSH', 'gold');
+  }
+
+  function playPushWhiffSound() {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const len = Math.floor(ctx.sampleRate * 0.18);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.setValueAtTime(2400, now);
+    filter.frequency.exponentialRampToValueAtTime(900, now + 0.18);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.12 * Tuning.AudioMasterVolume, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    src.start(now);
+  }
+
   function startChargingKineticPush() {
     if (State.RunPhase !== 'Running') return;
     State.bIsChargingKineticPush = true;
@@ -3296,6 +3498,17 @@
     orbitRingMesh.position.set(State.CoMPosition.x, State.CoMPosition.y, State.CoMPosition.z);
     orbitRingMesh.scale.set(1, Tuning.TetherLengthCm / 180.0, Tuning.TetherLengthCm / 180.0);
 
+    // 6.5 Push reach ring follows the body while winding up
+    pushReachRing.visible = State.RunPhase === 'Running' && State.bIsChargingKineticPush && Tuning.ActiveScreenMode !== 'ColossalBelt';
+    if (pushReachRing.visible) {
+      pushReachRing.position.set(
+        State.CoMPosition.x,
+        State.CoMPosition.y + State.InternalDisplacement.y,
+        State.CoMPosition.z + State.InternalDisplacement.z
+      );
+      pushReachRing.scale.setScalar(Tuning.PushReachCm);
+    }
+
     // 7. Debug Gizmo Visibility (Strict Rule 4 Blind Math)
     const bDrawGizmos = !State.bBlindMath && State.bShowGizmos;
     tangentArrow.visible = bDrawGizmos;
@@ -3792,11 +4005,15 @@
       powerRatio = State.KineticPushCharge;
     } else if (State.RunPhase === 'LaunchPushOff') {
       powerRatio = State.LaunchPushCharge;
+    } else if (State.bIsChargingKineticPush) {
+      powerRatio = State.KineticPushCharge;
     } else {
       const tanSpeed = Math.abs(State.AngularVelocityRadPerSec) * (Tuning.TetherLengthCm * 0.01);
       powerRatio = (0.5 * Tuning.MaceMassKg * tanSpeed * tanSpeed) / 4500.0;
     }
     powerRatio = Math.max(0, Math.min(1, powerRatio));
+    // Spin energy is shown dimmed; push charge at full brightness
+    HUD.powerArc.style.opacity = (isCorridor && State.RunPhase === 'Running' && !State.bIsChargingKineticPush) ? '0.45' : '';
     const arcQ = Math.round(powerRatio * 500);
     if (arcQ !== HUD.lastArcQ) {
       HUD.lastArcQ = arcQ;
@@ -4090,6 +4307,7 @@
     State.bIsChargingKineticPush = false;
     State.LaunchPushCharge = 0.0;
     State.KineticPushCharge = 0.0;
+    clearPushState();
     const btn = document.getElementById('btn-charge-push');
     if (btn) btn.classList.remove('charging');
   }
@@ -4391,6 +4609,8 @@
         startChargingKineticPush();
       } else if (State.RunPhase === 'LaunchPushOff') {
         startChargingPush();
+      } else if (State.RunPhase === 'Running' && !e.repeat) {
+        startPushCharge();
       }
     } else if (key === 'f') {
       if (Tuning.ActiveScreenMode === 'ColossalBelt') {
@@ -4422,6 +4642,8 @@
         releaseAndDeployKineticPush();
       } else if (State.RunPhase === 'LaunchPushOff') {
         fireLaunchPush();
+      } else {
+        releasePush();
       }
     } else if (key === 'a') {
       Input.isAPressed = false;
@@ -4475,6 +4697,11 @@
     bindSlider('slider-accel', Tuning, 'SpinAccelerationDegPerSec2', 'val-accel', 0);
     bindSlider('slider-max-speed', Tuning, 'MaxAngularSpeedDegPerSec', 'val-max-speed', 0);
     bindSlider('slider-alpha', Tuning, 'ImpulseEfficiencyAlpha', 'val-alpha', 2);
+    bindSlider('slider-push-reach', Tuning, 'PushReachCm', 'val-push-reach', 0);
+    bindSlider('slider-push-charge-rate', Tuning, 'PushChargeRatePerSec', 'val-push-charge-rate', 2);
+    bindSlider('slider-push-min-charge', Tuning, 'MinPushCharge', 'val-push-min-charge', 2);
+    bindSlider('slider-push-max-dv', Tuning, 'MaxPushDeltaVCmPerSec', 'val-push-max-dv', 0);
+    bindSlider('slider-push-buffer', Tuning, 'PushReleaseBufferMs', 'val-push-buffer', 0);
     bindSlider('slider-fov-dilation', Tuning, 'MaxSpeedFovDilationDeg', 'val-fov-dilation', 0);
     bindSlider('slider-dutch-roll', Tuning, 'MaxDutchRollDeg', 'val-dutch-roll', 1);
 
@@ -4536,6 +4763,16 @@
         Tuning.SpinAccelerationDegPerSec2 = 1440.0;
         Tuning.MaxAngularSpeedDegPerSec = 1080.0;
         Tuning.ImpulseEfficiencyAlpha = 0.65;
+        Tuning.PushReachCm = 650.0;
+        Tuning.PushChargeRatePerSec = 0.9;
+        Tuning.MinPushCharge = 0.15;
+        Tuning.MaxPushDeltaVCmPerSec = 1400.0;
+        Tuning.PushReleaseBufferMs = 150.0;
+        [['push-reach', 650, '650'], ['push-charge-rate', 0.9, '0.90'], ['push-min-charge', 0.15, '0.15'],
+         ['push-max-dv', 1400, '1400'], ['push-buffer', 150, '150']].forEach(([id, v, txt]) => {
+          document.getElementById('slider-' + id).value = v;
+          document.getElementById('val-' + id).textContent = txt;
+        });
         Tuning.MaxSpeedFovDilationDeg = 25.0;
         Tuning.MaxDutchRollDeg = 4.5;
         Tuning.AudioMasterVolume = 1.0;
