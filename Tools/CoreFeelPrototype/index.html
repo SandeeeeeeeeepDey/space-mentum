@@ -343,53 +343,11 @@
     </aside>
     </div>
 
-    <!-- Screen 2: Colossal Asteroid Belt & Kinetic Field Guidance Banner -->
-    <div id="colossal-mode-banner" class="colossal-mode-banner hidden">
-      <div class="colossal-mode-header">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span class="pulse-amber-dot"></span>
-          <span>COLOSSAL ASTEROID BELT & KINETIC PUSH FIELD ACTIVE</span>
-        </div>
-        <button id="btn-close-colossal-banner" class="btn-close-banner" title="Minimize / Dismiss Guidance">✕ DISMISS</button>
-      </div>
-      <div class="colossal-mode-body">
-        <div class="colossal-rule-item">
-          <span class="rule-icon">🪐</span>
-          <span><strong>Monolithic Asteroids:</strong> Much bigger (up to 35m across) with authentic zero-g tumble and crushing mass.</span>
-        </div>
-        <div class="colossal-rule-item">
-          <span class="rule-icon">🌌</span>
-          <span><strong>Vast Outer Belt:</strong> Expands far outside camera view (350m radius) into deep space.</span>
-        </div>
-        <div class="colossal-rule-item">
-          <span class="rule-icon">📐</span>
-          <span><strong>Multi-Angle Trajectories:</strong> Inbound from variable angles, always with a forward closing vector (Vx &lt; 0).</span>
-        </div>
-        <div class="colossal-rule-item">
-          <span class="rule-icon">🎯</span>
-          <span><strong>Aim & Lock:</strong> Move cursor to aim at asteroid, press <strong>[CLICK / F]</strong> to lock on.</span>
-        </div>
-        <div class="colossal-rule-item">
-          <span class="rule-icon">⚡</span>
-          <span><strong>Kinetic Push:</strong> Hold <strong>[SPACE / RIGHT CLICK]</strong> to decide how hard to push. Release to blast it!</span>
-        </div>
-        <div class="colossal-rule-item alert-rule">
-          <span class="rule-icon">⚠️</span>
-          <span><strong>Proximity Dilemma:</strong> If closer than 18m, weak pushes FAIL & <em>IT WILL PUSH YOU!</em></span>
-        </div>
-      </div>
-      <div class="colossal-mode-actions">
-        <button id="btn-colossal-lock" class="btn-colossal-btn">LOCK AIMED TARGET [F]</button>
-        <button id="btn-colossal-push" class="btn-colossal-btn btn-push-gradient">HOLD TO CHARGE PUSH [SPACE]</button>
-      </div>
-    </div>
-
     <!-- Cybernetic 3D Aiming Crosshair -->
     <div id="aim-crosshair-3d" class="aim-crosshair-3d hidden">
       <div class="crosshair-bracket left">[</div>
       <div class="crosshair-dot-ring"></div>
       <div class="crosshair-bracket right">]</div>
-      <div class="crosshair-aim-label">AIM RETICLE [MOVE MOUSE]</div>
     </div>
 
     <!-- Cybernetic Kinetic Lock-On Target Telemetry HUD -->
@@ -402,21 +360,9 @@
         <div class="reticle-rot-ring"></div>
         <div class="reticle-center-marker"></div>
       </div>
-      <div class="target-card">
-        <div class="target-card-header">
-          <span class="target-tag">TARGET LOCKED</span>
-          <span id="target-designation" class="target-id">COLOSSAL ASTEROID [THETA-9]</span>
-        </div>
-        <div class="target-metrics-grid">
-          <div class="t-metric"><span class="t-lbl">RANGE:</span> <span id="target-range" class="t-val highlight-cyan">48.5m</span></div>
-          <div class="t-metric"><span class="t-lbl">CLOSING:</span> <span id="target-speed" class="t-val">84.2 km/h</span></div>
-          <div class="t-metric"><span class="t-lbl">EST. TTI:</span> <span id="target-tti" class="t-val highlight-gold">2.1s</span></div>
-          <div class="t-metric"><span class="t-lbl">DIAMETER:</span> <span id="target-size" class="t-val">Ø 24.0m (48T)</span></div>
-        </div>
-        <div id="target-proximity-dilemma" class="target-dilemma-alert hidden">
-          <span class="dilemma-icon">⚠</span>
-          <span class="dilemma-text">CRITICAL PROXIMITY! DECIDE: PUSH OR IT PUSHES YOU!</span>
-        </div>
+      <div class="target-line hud-label">
+        <span id="target-range">48m</span> &middot; <span id="target-tti">2.1s</span>
+        <span id="target-proximity-dilemma" class="target-too-close hidden">TOO CLOSE</span>
       </div>
     </div>
 

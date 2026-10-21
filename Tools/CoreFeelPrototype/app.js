@@ -1056,9 +1056,9 @@
   function restartRun() {
     if (Tuning.ActiveScreenMode === 'ColossalBelt') {
       State.RunPhase = 'Running';
-      State.CoMPosition.set(0, 0, 0);
-      State.CoMVelocity.set(400, 0, 0);
-      State.LateralVelocity.set(0, 0, 0);
+      State.CoMPosition.x = 0.0; State.CoMPosition.y = 0.0; State.CoMPosition.z = 0.0;
+      State.CoMVelocity.x = 400.0; State.CoMVelocity.y = 0.0; State.CoMVelocity.z = 0.0;
+      State.LateralVelocity.y = 0.0; State.LateralVelocity.z = 0.0;
       State.AngularVelocityRadPerSec = 0.0;
       State.OrbitAngleRad = 0.0;
       State.HeldSpinDirection = 'None';
@@ -1074,8 +1074,6 @@
       const banner = document.getElementById('launch-guidance-banner');
       if (banner) banner.classList.add('hidden');
       countHintRun();
-      const colossalBanner = document.getElementById('colossal-mode-banner');
-      if (colossalBanner) colossalBanner.classList.remove('hidden');
 
       const voidModal = document.getElementById('void-doom-modal');
       if (voidModal) voidModal.classList.add('hidden');
@@ -1339,7 +1337,8 @@
     doomCheckAccumulator += dt;
     if (doomCheckAccumulator >= 0.12) {
       doomCheckAccumulator = 0;
-      evaluateBackgroundDoomLookahead();
+      // Colossal Belt has no corridor anchors to look ahead at; the doom verdict is corridor-only
+      if (Tuning.ActiveScreenMode !== 'ColossalBelt') evaluateBackgroundDoomLookahead();
     }
 
     // 13. Dynamic Camera FOV Shifter
@@ -2601,11 +2600,8 @@
 
     const reticleEl = document.getElementById('kinetic-target-reticle');
     const dilemmaEl = document.getElementById('target-proximity-dilemma');
-    const desigEl = document.getElementById('target-designation');
     const rangeEl = document.getElementById('target-range');
-    const speedEl = document.getElementById('target-speed');
     const ttiEl = document.getElementById('target-tti');
-    const sizeEl = document.getElementById('target-size');
 
     aimRaycaster.setFromCamera(mouseNormalized, camera);
 
@@ -2676,12 +2672,11 @@
         reticleEl.classList.remove('hidden');
       }
 
-      if (desigEl) desigEl.textContent = `${target.name} [M=${Math.round(target.massKg / 1000)}T]`;
-      if (rangeEl) rangeEl.textContent = `${(distCm * 0.01).toFixed(1)}m`;
-      if (speedEl) speedEl.textContent = `${(closingSpeedCms * 0.036).toFixed(1)} km/h`;
+      if (rangeEl) rangeEl.textContent = `${Math.round(distCm * 0.01)}m`;
       if (ttiEl) ttiEl.textContent = tti < 99 ? `${tti.toFixed(1)}s` : 'CLEAR';
-      if (sizeEl) sizeEl.textContent = `Ø ${(target.radius * 0.02).toFixed(1)}m`;
 
+      // Proximity dilemma: box turns rose + short TOO CLOSE tag
+      if (reticleEl) reticleEl.classList.toggle('critical', bIsCritical);
       if (dilemmaEl) {
         dilemmaEl.classList.toggle('hidden', !bIsCritical);
       }
@@ -2840,7 +2835,6 @@
     Tuning.ActiveScreenMode = mode;
     const btnGauntlet = document.getElementById('btn-screen-gauntlet');
     const btnColossal = document.getElementById('btn-screen-colossal');
-    const colossalBanner = document.getElementById('colossal-mode-banner');
     const aimCrosshair = document.getElementById('aim-crosshair-3d');
     const kineticCard = document.getElementById('card-kinetic-target');
     const pushCard = document.getElementById('card-push-force');
@@ -2848,7 +2842,6 @@
     if (mode === 'ColossalBelt') {
       if (btnGauntlet) btnGauntlet.classList.remove('active');
       if (btnColossal) btnColossal.classList.add('active');
-      if (colossalBanner) colossalBanner.classList.remove('hidden');
       if (aimCrosshair) aimCrosshair.classList.remove('hidden');
       if (kineticCard) kineticCard.classList.remove('hidden');
       if (pushCard) pushCard.classList.remove('hidden');
@@ -2860,7 +2853,6 @@
     } else {
       if (btnGauntlet) btnGauntlet.classList.add('active');
       if (btnColossal) btnColossal.classList.remove('active');
-      if (colossalBanner) colossalBanner.classList.add('hidden');
       if (aimCrosshair) aimCrosshair.classList.add('hidden');
       const reticle = document.getElementById('kinetic-target-reticle');
       if (reticle) reticle.classList.add('hidden');
@@ -4157,7 +4149,7 @@
   window.addEventListener('mousemove', onMouseMoveAim);
 
   window.addEventListener('mousedown', (e) => {
-    if (e.target.closest('#dev-overlay') || e.target.closest('#tuning-drawer') || e.target.closest('.hud-panel') || e.target.closest('.screen-switcher-tabs') || e.target.closest('.colossal-mode-actions') || e.target.closest('.modal-backdrop') || e.target.closest('button')) {
+    if (e.target.closest('#dev-overlay') || e.target.closest('#tuning-drawer') || e.target.closest('.hud-panel') || e.target.closest('.screen-switcher-tabs') || e.target.closest('.modal-backdrop') || e.target.closest('button')) {
       return;
     }
     if (Tuning.ActiveScreenMode === 'ColossalBelt') {
@@ -4439,35 +4431,6 @@
     const btnScreenColossal = document.getElementById('btn-screen-colossal');
     if (btnScreenColossal) {
       btnScreenColossal.addEventListener('click', () => setScreenMode('ColossalBelt'));
-    }
-
-    const btnColossalLock = document.getElementById('btn-colossal-lock');
-    if (btnColossalLock) {
-      btnColossalLock.addEventListener('click', () => {
-        if (State.KineticLockStatus === 'Locked') unlockKineticTarget();
-        else lockKineticTarget();
-      });
-    }
-
-    const btnColossalPush = document.getElementById('btn-colossal-push');
-    if (btnColossalPush) {
-      btnColossalPush.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        startChargingKineticPush();
-      });
-      window.addEventListener('pointerup', () => {
-        if (State.bIsChargingKineticPush) {
-          releaseAndDeployKineticPush();
-        }
-      });
-    }
-
-    const btnCloseColossalBanner = document.getElementById('btn-close-colossal-banner');
-    if (btnCloseColossalBanner) {
-      btnCloseColossalBanner.addEventListener('click', () => {
-        const banner = document.getElementById('colossal-mode-banner');
-        if (banner) banner.classList.add('hidden');
-      });
     }
 
     // Interactive Launch Button (Touch/Mouse)
