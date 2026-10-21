@@ -63,6 +63,15 @@
 
       <!-- Key hints: launch phase + first runs only -->
       <div id="hud-hints" class="hud-hints hud-label hidden">A / D spin &middot; release to kick &middot; ESC pause</div>
+      <!-- Alerts: toasts, proximity vignette + threat chevron, doom overlay -->
+      <div id="toast-layer" class="toast-layer"></div>
+      <div id="vignette-proximity" class="vignette-proximity"></div>
+      <div id="threat-chevron" class="threat-chevron hidden">&#10095;</div>
+      <div id="impact-tag" class="impact-tag hud-label hidden">IMPACT</div>
+      <div id="doom-overlay" class="doom-overlay hidden">
+        <div class="doom-fog"></div>
+        <div class="doom-text">NO ANCHORS IN REACH</div>
+      </div>
     </div>
 
     <!-- Dev Overlay: engineering telemetry + tuning drawer (toggle with ` or F3, or ?dev=1) -->
@@ -205,17 +214,6 @@
               <div id="power-widget-desc" class="power-desc">Hold [SPACE] to compress hydraulic ram against asteroid</div>
             </div>
 
-            <!-- Step 7 Proximity Radar Hazard Warning Widget -->
-            <div id="proximity-warning-widget" class="proximity-warning-widget safe">
-              <div class="proximity-header">
-                <span class="prox-icon">⚡</span>
-                <span id="prox-status-text" class="prox-status">PROXIMITY: CLEAR</span>
-                <span id="prox-distance-text" class="prox-distance">> 25m</span>
-              </div>
-              <div class="prox-meter-track">
-                <div id="prox-meter-bar" class="prox-meter-bar"></div>
-              </div>
-            </div>
           </div>
         </div>
       </section>
@@ -419,51 +417,6 @@
           <span class="dilemma-icon">⚠</span>
           <span class="dilemma-text">CRITICAL PROXIMITY! DECIDE: PUSH OR IT PUSHES YOU!</span>
         </div>
-      </div>
-    </div>
-
-    <!-- Kinetic Push Deflection Flash Banner -->
-    <div id="push-deflection-banner" class="strike-banner push-banner hidden">
-      <div class="strike-icon">⚡</div>
-      <div class="strike-text-group">
-        <div class="strike-title">KINETIC PUSH DEFLECTION!</div>
-        <div id="push-detail" class="strike-detail">Delivered +38.5 kN repulsion! Asteroid blasted away with reaction recoil.</div>
-      </div>
-    </div>
-
-    <!-- Asteroid Overpowered Push Banner ("it will push it") -->
-    <div id="asteroid-overpower-banner" class="strike-banner overpower-banner hidden">
-      <div class="strike-icon">💥</div>
-      <div class="strike-text-group">
-        <div class="strike-title" style="color: #ef4444;">ASTEROID OVERPOWERED PUSH — IT PUSHES YOU!</div>
-        <div id="overpower-detail" class="strike-detail">Too close & weak charge! Colossal inertia overpowered the push & slammed your suit backwards!</div>
-      </div>
-    </div>
-
-    <!-- External Mace Strike Flash Banner -->
-    <div id="strike-banner" class="strike-banner hidden">
-      <div class="strike-icon">💥</div>
-      <div class="strike-text-group">
-        <div class="strike-title">EXTERNAL MACE STRIKE!</div>
-        <div id="strike-detail" class="strike-detail">Momentum transferred: +420 cm/s CoM deflection</div>
-      </div>
-    </div>
-
-    <!-- Greybox Slalom Evasion Notification Banner -->
-    <div id="slalom-banner" class="slalom-banner hidden">
-      <div class="slalom-icon" id="slalom-icon">✓</div>
-      <div class="slalom-text-group">
-        <div id="slalom-title" class="slalom-title">CLEAN EVASION!</div>
-        <div id="slalom-detail" class="slalom-detail">Gate 1 Cleared: +245 cm clearance</div>
-      </div>
-    </div>
-
-    <!-- Celestial Milestone Checkpoint Notification Banner -->
-    <div id="milestone-banner" class="milestone-banner hidden">
-      <div class="milestone-icon">✦</div>
-      <div class="milestone-text-group">
-        <div id="milestone-title" class="milestone-title">MILESTONE REACHED</div>
-        <div id="milestone-detail" class="milestone-detail">Alpha Horizon (300m) • +500 PTS</div>
       </div>
     </div>
 

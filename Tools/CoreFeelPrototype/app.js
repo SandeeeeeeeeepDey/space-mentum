@@ -426,47 +426,26 @@
     pingOsc.stop(now + 0.055);
   }
 
-  function updateProximityRadarAlarm(minDistCm, nowSeconds) {
+  function updateProximityRadarAlarm(minDistCm, nowSeconds, nearestPos) {
     const thresholdCm = Tuning.ProximityDistanceThresholdCm;
-    const proxWidget = document.getElementById('proximity-warning-widget');
-    const proxStatus = document.getElementById('prox-status-text');
-    const proxDist = document.getElementById('prox-distance-text');
-    const proxMeter = document.getElementById('prox-meter-bar');
 
     if (minDistCm <= thresholdCm && State.RunPhase === 'Running') {
       const threatRatio = Math.max(0.0, Math.min(1.0, 1.0 - (minDistCm / thresholdCm)));
       State.ProximityAlarm.bIsActive = true;
       State.ProximityAlarm.threatRatio = threatRatio;
       State.ProximityAlarm.distanceCm = minDistCm;
+      State.ProximityAlarm.nearestPos = nearestPos || null;
 
       const pingInterval = 1.0 - (threatRatio * 0.92);
       if (nowSeconds - lastProximityPingTime >= pingInterval) {
         lastProximityPingTime = nowSeconds;
         playProximityRadarPing(threatRatio);
       }
-
-      if (proxWidget) {
-        if (threatRatio > 0.65) {
-          proxWidget.className = 'proximity-warning-widget danger';
-          if (proxStatus) proxStatus.textContent = 'COLLISION IMMINENT!';
-        } else {
-          proxWidget.className = 'proximity-warning-widget warning';
-          if (proxStatus) proxStatus.textContent = 'HAZARD PROXIMITY!';
-        }
-        if (proxDist) proxDist.textContent = (minDistCm * 0.01).toFixed(1) + 'm';
-        if (proxMeter) proxMeter.style.width = (threatRatio * 100).toFixed(0) + '%';
-      }
     } else {
       State.ProximityAlarm.bIsActive = false;
       State.ProximityAlarm.threatRatio = 0.0;
       State.ProximityAlarm.distanceCm = minDistCm;
-
-      if (proxWidget) {
-        proxWidget.className = 'proximity-warning-widget safe';
-        if (proxStatus) proxStatus.textContent = 'PROXIMITY: CLEAR';
-        if (proxDist) proxDist.textContent = '> ' + (thresholdCm * 0.01).toFixed(0) + 'm';
-        if (proxMeter) proxMeter.style.width = '0%';
-      }
+      State.ProximityAlarm.nearestPos = null;
     }
   }
 
@@ -962,22 +941,28 @@
     State.CameraTrauma = Math.min(1.0, State.CameraTrauma + 0.45);
   }
 
-  function triggerStrikeFlash(obstacle, deltaV, u) {
-    const banner = document.getElementById('strike-banner');
-    const titleEl = document.querySelector('.strike-title');
-    const detailEl = document.getElementById('strike-detail');
-    if (banner && detailEl) {
-      const defMag = deltaV.length().toFixed(0);
-      if (titleEl) {
-        titleEl.textContent = u > 0.65 ? 'MACE IMPACT DEFLECTION!' : 'MECHANICAL ARM PUSH!';
-      }
-      detailEl.textContent = `Pushed +${defMag} cm/s off ${obstacle.name || 'Asteroid'}! Trajectory shifted.`;
-      banner.classList.remove('hidden');
+  // --- Toasts: short floating event text (Creator: minimal HUD, only what the player needs) ---
+  const TOAST_MAX_VISIBLE = 3;
 
-      setTimeout(() => {
-        banner.classList.add('hidden');
-      }, 2400);
-    }
+  function showToast(text, variant) {
+    const layer = document.getElementById('toast-layer');
+    if (!layer) return;
+    while (layer.children.length >= TOAST_MAX_VISIBLE) layer.removeChild(layer.firstChild);
+    const el = document.createElement('div');
+    el.className = `toast ${variant || 'cyan'}`;
+    el.textContent = text;
+    layer.appendChild(el);
+    el.addEventListener('animationend', () => el.remove());
+    setTimeout(() => el.remove(), 1100); // fallback if animations are disabled
+  }
+
+  function clearToasts() {
+    const layer = document.getElementById('toast-layer');
+    if (layer) layer.innerHTML = '';
+  }
+
+  function triggerStrikeFlash() {
+    showToast('STRIKE', 'gold');
 
     const container = document.getElementById('canvas-container');
     if (container) {
@@ -1082,6 +1067,9 @@
       State.KineticPushCharge = 0.0;
       State.bIsChargingKineticPush = false;
       unlockKineticTarget();
+      clearToasts();
+      State.ProximityAlarm.threatRatio = 0.0;
+      State.ProximityAlarm.nearestPos = null;
 
       const banner = document.getElementById('launch-guidance-banner');
       if (banner) banner.classList.add('hidden');
@@ -1158,12 +1146,10 @@
     if (victoryModal) victoryModal.classList.add('hidden');
     const sectorModal = document.getElementById('sector-select-modal');
     if (sectorModal) sectorModal.classList.add('hidden');
-    const strikeBanner = document.getElementById('strike-banner');
-    if (strikeBanner) strikeBanner.classList.add('hidden');
-    const slalomBanner = document.getElementById('slalom-banner');
-    if (slalomBanner) slalomBanner.classList.add('hidden');
-    const milestoneBanner = document.getElementById('milestone-banner');
-    if (milestoneBanner) milestoneBanner.classList.add('hidden');
+    clearToasts();
+    State.ProximityAlarm.bIsActive = false;
+    State.ProximityAlarm.threatRatio = 0.0;
+    State.ProximityAlarm.nearestPos = null;
 
     // Reset slalom gates
     for (const target of SlalomTargets) {
@@ -1294,6 +1280,7 @@
 
     // 7.5. Step 7 Proximity Radar Alarm & Engine Hum Audio
     let minObsDistCm = 999999.0;
+    let nearestObsPos = null;
     for (const obs of denseObstacles) {
       if (obs.destroyed) continue;
       const dx = obs.position.x - State.CoMPosition.x;
@@ -1305,9 +1292,10 @@
       ) - obs.radius;
       if (dist < minObsDistCm) {
         minObsDistCm = Math.max(0, dist);
+        nearestObsPos = obs.position;
       }
     }
-    updateProximityRadarAlarm(minObsDistCm, performance.now() / 1000.0);
+    updateProximityRadarAlarm(minObsDistCm, performance.now() / 1000.0, nearestObsPos);
     updateContinuousEngineHumAudio(State.CoMVelocity.x, Math.hypot(State.LateralVelocity.y, State.LateralVelocity.z));
 
     // 8. Slalom Gate Evasions
@@ -1460,28 +1448,13 @@
     }
   }
 
-  function showSlalomBanner(isSuccess, target, clearance) {
-    const banner = document.getElementById('slalom-banner');
-    const icon = document.getElementById('slalom-icon');
-    const title = document.getElementById('slalom-title');
-    const detail = document.getElementById('slalom-detail');
+  const CLEAN_GATE_POINTS = 500; // mirrors the (CleanGatesCleared * 500) term of the score formula
 
-    if (banner && title && detail) {
-      if (isSuccess) {
-        banner.className = 'slalom-banner success';
-        icon.textContent = '✓';
-        const streakText = State.CleanEvasionStreak > 1 ? ` (STREAK ${State.CleanEvasionStreak}x!)` : '';
-        title.textContent = `CLEAN EVASION!${streakText}`;
-        detail.textContent = `${target.name} Cleared: +${clearance.toFixed(0)} cm clearance!`;
-      } else {
-        banner.className = 'slalom-banner graze';
-        icon.textContent = '⚠';
-        title.textContent = 'GRAZED BOUNDARY!';
-        detail.textContent = `${target.name} Missed by ${clearance.toFixed(0)} cm! Streak reset.`;
-      }
-
-      banner.classList.remove('hidden');
-      setTimeout(() => { banner.classList.add('hidden'); }, 2200);
+  function showSlalomBanner(isSuccess) {
+    if (isSuccess) {
+      showToast(`CLEAN +${CLEAN_GATE_POINTS}`, 'cyan');
+    } else {
+      showToast('MISSED GATE', 'rose');
     }
   }
 
@@ -1502,15 +1475,7 @@
   }
 
   function showMilestoneBanner(title, bonus) {
-    const banner = document.getElementById('milestone-banner');
-    const titleEl = document.getElementById('milestone-title');
-    const detailEl = document.getElementById('milestone-detail');
-    if (banner && titleEl && detailEl) {
-      titleEl.textContent = 'CELESTIAL MILESTONE REACHED!';
-      detailEl.textContent = `${title} • +${bonus} PTS BONUS!`;
-      banner.classList.remove('hidden');
-      setTimeout(() => { banner.classList.add('hidden'); }, 2800);
-    }
+    showToast(`${title} +${bonus}`, 'gold');
   }
 
   // --- Step 6: Sector Run Victory & Jump Portal Completion ---
@@ -2842,13 +2807,7 @@
   }
 
   function triggerPushDeflectionFlash(forceKN) {
-    const banner = document.getElementById('push-deflection-banner');
-    const detail = document.getElementById('push-detail');
-    if (banner && detail) {
-      detail.textContent = `Delivered +${forceKN.toFixed(1)} kN kinetic repulsion! Asteroid deflected with reaction recoil.`;
-      banner.classList.remove('hidden');
-      setTimeout(() => { banner.classList.add('hidden'); }, 2200);
-    }
+    showToast(`PUSH ${forceKN.toFixed(0)} kN`, 'gold');
     const container = document.getElementById('canvas-container');
     if (container) {
       container.style.filter = 'brightness(1.8) drop-shadow(0 0 45px rgba(0,240,255,0.9))';
@@ -2857,11 +2816,7 @@
   }
 
   function triggerAsteroidOverpowerFlash() {
-    const banner = document.getElementById('asteroid-overpower-banner');
-    if (banner) {
-      banner.classList.remove('hidden');
-      setTimeout(() => { banner.classList.add('hidden'); }, 2600);
-    }
+    showToast('OVERPOWERED!', 'rose');
     const container = document.getElementById('canvas-container');
     if (container) {
       container.style.filter = 'brightness(2.2) drop-shadow(0 0 60px rgba(239,68,68,0.95)) hue-rotate(300deg)';
@@ -3742,6 +3697,10 @@
     HUD.launchHold = document.getElementById('btn-charge-push');
     HUD.launchHoldText = document.getElementById('charge-btn-text');
     HUD.hints = document.getElementById('hud-hints');
+    HUD.vignette = document.getElementById('vignette-proximity');
+    HUD.chevron = document.getElementById('threat-chevron');
+    HUD.impactTag = document.getElementById('impact-tag');
+    HUD.doomOverlay = document.getElementById('doom-overlay');
     HUD.hintRuns = readHintRuns();
     HUD.ready = true;
   }
@@ -3781,6 +3740,47 @@
     }
     HUD.progressPortal.style.borderColor = sector.portalThemeColorStr;
     HUD.progressPortal.style.color = sector.portalThemeColorStr;
+  }
+
+  const _alertVec = new THREE.Vector3();
+
+  function updateHudAlerts() {
+    const alarm = State.ProximityAlarm;
+    const running = State.RunPhase === 'Running';
+    const threat = running && alarm.bIsActive ? alarm.threatRatio : 0.0;
+
+    // Vignette opacity scales with the existing threat ratio (quantized to avoid per-frame style churn)
+    const vq = Math.round(threat * 40) / 40;
+    if (HUD.vignetteQ !== vq) {
+      HUD.vignetteQ = vq;
+      HUD.vignette.style.opacity = String(Math.min(1, vq * 1.1));
+    }
+
+    // Edge chevron pointing at the nearest threat
+    const showChevron = threat > 0.05 && alarm.nearestPos && camera;
+    if (showChevron) {
+      _alertVec.copy(alarm.nearestPos).project(camera);
+      let nx = _alertVec.x;
+      let ny = _alertVec.y;
+      if (_alertVec.z > 1.0) { nx = -nx; ny = -ny; } // behind camera: mirror to the opposite edge
+      const m = Math.max(Math.abs(nx), Math.abs(ny));
+      const s = m > 0.0001 ? 0.88 / m : 0;
+      if (m <= 0.0001) ny = -1; // dead centre: point up
+      const ex = m > 0.0001 ? nx * s : 0;
+      const ey = m > 0.0001 ? ny * s : -0.88;
+      const px = (ex * 0.5 + 0.5) * window.innerWidth;
+      const py = (-ey * 0.5 + 0.5) * window.innerHeight;
+      const angle = Math.atan2(-ey, ex) * (180 / Math.PI);
+      HUD.chevron.style.transform = `translate(${px.toFixed(0)}px, ${py.toFixed(0)}px) rotate(${angle.toFixed(0)}deg)`;
+    }
+    HUD.chevron.classList.toggle('hidden', !showChevron);
+
+    // "IMPACT" only when closer than 40% of the alarm distance (threat ratio > 0.6)
+    HUD.impactTag.classList.toggle('hidden', !(threat > 0.6));
+
+    // Doom: only shown while a doom verdict is pending
+    const doom = running && State.DoomSnapshot.bIsDoomImminent;
+    HUD.doomOverlay.classList.toggle('hidden', !doom);
   }
 
   // Player-facing HUD (always runs)
@@ -3859,6 +3859,9 @@
     }
     setHudText(HUD.hints, hintText);
     HUD.hints.classList.toggle('hidden', hintText === '');
+
+    // Alerts: proximity vignette + edge chevron + IMPACT tag, doom overlay
+    updateHudAlerts();
 
     // Power arc: launch charge / push charge (Colossal) / spin energy in flight
     let powerRatio;

@@ -2311,3 +2311,118 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   .launch-hold { animation: none; }
 }
+
+/* --- Toasts & Alerts (Creator: minimal, only what the player needs to act on) --- */
+.toast-layer {
+  position: absolute;
+  top: 26%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.toast {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  color: var(--color-cyan);
+  text-shadow: 0 0 10px rgba(0, 0, 0, 0.85), 0 0 18px currentColor;
+  animation: toastFloat 900ms ease-out forwards;
+}
+
+.toast.gold { color: var(--color-gold); }
+.toast.rose { color: var(--color-rose); }
+
+@keyframes toastFloat {
+  0% { opacity: 0; transform: translateY(8px) scale(0.85); }
+  15% { opacity: 1; transform: translateY(0) scale(1.05); }
+  30% { transform: translateY(-6px) scale(1); }
+  100% { opacity: 0; transform: translateY(-40px) scale(1); }
+}
+
+.vignette-proximity {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, rgba(244, 63, 94, 0) 48%, rgba(244, 63, 94, 0.55) 100%);
+  transition: opacity 0.15s ease-out;
+}
+
+.threat-chevron {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 36px;
+  height: 36px;
+  margin: -18px 0 0 -18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--color-rose);
+  text-shadow: 0 0 12px rgba(244, 63, 94, 0.9);
+  animation: chevronPulse 0.6s ease-in-out infinite;
+}
+
+@keyframes chevronPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.impact-tag {
+  position: absolute;
+  top: calc(50% + 30px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--color-rose);
+}
+
+.doom-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.doom-fog {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(5, 7, 13, 0) 40%, rgba(5, 7, 13, 0.78) 100%);
+  -webkit-backdrop-filter: grayscale(0.7);
+  backdrop-filter: grayscale(0.7);
+  -webkit-mask-image: radial-gradient(ellipse at center, transparent 35%, #000 100%);
+  mask-image: radial-gradient(ellipse at center, transparent 35%, #000 100%);
+}
+
+.doom-text {
+  position: absolute;
+  top: 40%;
+  font-family: var(--font-sans);
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: 0.2em;
+  color: var(--color-rose);
+  text-shadow: 0 0 12px rgba(0, 0, 0, 0.9);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  animation: chevronPulse 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: toastFade 900ms ease-out forwards; }
+  .threat-chevron, .doom-text { animation: none; }
+}
+
+@keyframes toastFade {
+  0% { opacity: 0; }
+  15% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
+}
