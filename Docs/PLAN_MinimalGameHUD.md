@@ -199,7 +199,7 @@ The source files are large (`app.js` ~4.3k lines, `style.css` ~2k, `index.html` 
 **Progress tracker:**
 
 - [x] Phase 1 — Dev Overlay — notes: `Input` object was never declared in app.js (pre-existing ReferenceError) — now defined next to new `UI` state; `updateHUD()` = `updateGameHUD()` + `updateDevHUD()` (only if `UI.devOpen`); `setDevOverlay(bool)`; M hotkey dev-only; radar canvas/proximity widget currently live inside the hidden overlay until phase 2 moves them.
-- [ ] Phase 2 — Core HUD — notes:
+- [x] Phase 2 — Core HUD — notes: new `#game-hud` + `HUD` cache object (`cacheHudRefs`, `setHudText`, `rebuildProgressMarkers`); footer + radar widget removed (radar canvas now in `.hud-radar`, circular clip, labels/counter dropped); dev cockpit panel kept as "COCKPIT EXTRAS". CORRIDOR/COLOSSAL tabs + sector button still live in the Dev Overlay header until phase 6 menus. Added missing `playGrazeWarning()` (was an undefined-function crash on missed gates). Old launch/colossal banners still in-flow (centered) until phases 3/5. Dead CSS (cockpit/radar-widget/key-pill) left for phase 8.
 - [ ] Phase 3 — Launch prompt — notes:
 - [ ] Phase 4 — Toasts + alerts — notes:
 - [ ] Phase 5 — Colossal cleanup — notes:

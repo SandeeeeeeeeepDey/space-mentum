@@ -788,6 +788,24 @@
     });
   }
 
+  function playGrazeWarning() {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.exponentialRampToValueAtTime(110, now + 0.22);
+    gain.gain.setValueAtTime(0.14 * Tuning.AudioMasterVolume, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.25);
+  }
+
   function playMilestoneChime() {
     const ctx = getAudioContext();
     if (!ctx) return;
@@ -3459,7 +3477,7 @@
 
   // --- Tactical Navigational Radar Renderer (120m Lookahead Cockpit Mirror) ---
   function drawTacticalRadar() {
-    const canvas = document.getElementById('radar-canvas');
+    const canvas = HUD.radarCanvas || document.getElementById('radar-canvas');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const width = canvas.width;
@@ -3469,6 +3487,10 @@
     const scale = (center - 10) / radarRangeCm;
 
     ctx.clearRect(0, 0, width, height);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(center, center, center, 0, Math.PI * 2);
+    ctx.clip(); // circular radar disc
 
     // 1. Concentric Range Rings (30m, 60m, 90m, 120m)
     const ringSteps = [3000, 6000, 9000, 12000];
@@ -3481,14 +3503,6 @@
       ctx.arc(center, center, radius, 0, Math.PI * 2);
       ctx.stroke();
     }
-
-    // Range Distance Labels
-    ctx.fillStyle = 'rgba(0, 240, 255, 0.45)';
-    ctx.font = '8px "JetBrains Mono", monospace';
-    ctx.fillText('30m', center + 2, center - 3000 * scale + 8);
-    ctx.fillText('60m', center + 2, center - 6000 * scale + 8);
-    ctx.fillText('90m', center + 2, center - 9000 * scale + 8);
-    ctx.fillText('120m', center + 2, center - 12000 * scale + 8);
 
     // 2. Tunnel Corridor Boundaries (800cm width lines)
     const tunnelHalfWidth = 800 * scale;
@@ -3670,11 +3684,7 @@
     ctx.lineTo(center + Math.sin(headingRad) * 16, center - Math.cos(headingRad) * 16);
     ctx.stroke();
 
-    // Update contacts counter badge
-    const counterEl = document.getElementById('radar-contacts-count');
-    if (counterEl) {
-      counterEl.textContent = `${contactCount} CONTACTS`;
-    }
+    ctx.restore();
   }
 
   // --- HUD Updates ---
@@ -3683,12 +3693,139 @@
     if (UI.devOpen) updateDevHUD();
   }
 
+  // --- Minimal Game HUD ---
+  // Creator: "make the game screen minimalistic with only the information needed.
+  //           the interface doesnt look vary playagle and game like right now."
+  const HUD_ARC_CIRCUMFERENCE = 2 * Math.PI * 52; // matches r=52 in #game-hud SVG dial
+  const HUD = { ready: false, markerKey: '', gateTicks: [], lastScore: 0, lastArcQ: -1, arcHot: false };
+
+  function cacheHudRefs() {
+    HUD.progress = document.getElementById('hud-progress');
+    HUD.progressFill = document.getElementById('hud-progress-fill');
+    HUD.progressMarks = document.getElementById('hud-progress-marks');
+    HUD.progressPortal = document.getElementById('hud-progress-portal');
+    HUD.progressText = document.getElementById('hud-progress-text');
+    HUD.scoreVal = document.getElementById('hud-score-val');
+    HUD.streak = document.getElementById('hud-streak');
+    HUD.speedVal = document.getElementById('hud-speed-val');
+    HUD.powerArc = document.getElementById('hud-power-arc');
+    HUD.radarCanvas = document.getElementById('radar-canvas');
+    HUD.ready = true;
+  }
+
+  // Only touch the DOM when a value actually changed
+  function setHudText(el, value) {
+    if (el && el._hudV !== value) {
+      el._hudV = value;
+      el.textContent = value;
+    }
+  }
+
+  function setHudClass(el, className) {
+    if (el && el.className !== className) el.className = className;
+  }
+
+  // Rebuild gate ticks / milestone diamonds / portal color when sector or mode changes
+  function rebuildProgressMarkers(sector) {
+    HUD.progressMarks.innerHTML = '';
+    HUD.gateTicks = [];
+    HUD.diamonds = [];
+    const len = sector.corridorLengthCm;
+    for (const g of sector.gates) {
+      const tick = document.createElement('div');
+      tick.className = 'hud-tick';
+      tick.style.left = `${(g.forwardX / len) * 100}%`;
+      HUD.progressMarks.appendChild(tick);
+      HUD.gateTicks.push(tick);
+    }
+    for (const m of sector.milestones || []) {
+      const d = document.createElement('div');
+      d.className = 'hud-diamond';
+      d.style.left = `${(m.distCm / len) * 100}%`;
+      d.dataset.dist = m.distCm;
+      HUD.progressMarks.appendChild(d);
+      HUD.diamonds.push(d);
+    }
+    HUD.progressPortal.style.borderColor = sector.portalThemeColorStr;
+    HUD.progressPortal.style.color = sector.portalThemeColorStr;
+  }
+
   // Player-facing HUD (always runs)
   function updateGameHUD() {
-    // Key pill active states (footer removed in phase 2)
-    document.getElementById('key-a').classList.toggle('active', Input.isAPressed);
-    document.getElementById('key-d').classList.toggle('active', Input.isDPressed);
-    document.getElementById('key-space').classList.toggle('active', Input.isSpacePressed);
+    if (!HUD.ready) cacheHudRefs();
+
+    const isCorridor = Tuning.ActiveScreenMode !== 'ColossalBelt';
+    const sector = SectorCatalog[State.CurrentSectorIndex];
+
+    // Progress bar (corridor only)
+    HUD.progress.style.visibility = isCorridor ? 'visible' : 'hidden';
+    if (isCorridor && sector) {
+      const markerKey = `${State.CurrentSectorIndex}|${SlalomTargets.length}`;
+      if (HUD.markerKey !== markerKey) {
+        HUD.markerKey = markerKey;
+        rebuildProgressMarkers(sector);
+      }
+      const frac = Math.max(0, Math.min(1, State.CoMPosition.x / sector.corridorLengthCm));
+      const pct = (frac * 100).toFixed(1);
+      if (HUD.progressFill._pct !== pct) {
+        HUD.progressFill._pct = pct;
+        HUD.progressFill.style.width = `${pct}%`;
+      }
+      const distM = Math.max(0, Math.round(State.CoMPosition.x * 0.01));
+      setHudText(HUD.progressText, `${distM} / ${Math.round(sector.corridorLengthCm * 0.01)} m`);
+      for (let i = 0; i < HUD.gateTicks.length && i < SlalomTargets.length; i++) {
+        const t = SlalomTargets[i];
+        setHudClass(HUD.gateTicks[i], t.evaluated ? (t.cleared ? 'hud-tick cleared' : 'hud-tick missed') : 'hud-tick');
+      }
+      for (const d of HUD.diamonds) {
+        setHudClass(d, State.CoMPosition.x >= parseFloat(d.dataset.dist) ? 'hud-diamond reached' : 'hud-diamond');
+      }
+    } else {
+      HUD.markerKey = '';
+    }
+
+    // Score + streak chip
+    const score = State.CurrentCompositeScore;
+    setHudText(HUD.scoreVal, score.toLocaleString());
+    if (score > HUD.lastScore) {
+      HUD.scoreVal.classList.remove('pop');
+      void HUD.scoreVal.offsetWidth; // restart the pop animation
+      HUD.scoreVal.classList.add('pop');
+    }
+    HUD.lastScore = score;
+    const showStreak = State.CleanEvasionStreak > 1;
+    HUD.streak.classList.toggle('hidden', !showStreak);
+    if (showStreak) setHudText(HUD.streak, `x${State.CleanEvasionStreak}`);
+
+    // Speed dial
+    const speedCms = Math.hypot(
+      State.CoMVelocity.x,
+      State.CoMVelocity.y + State.LateralVelocity.y,
+      State.CoMVelocity.z + State.LateralVelocity.z
+    );
+    setHudText(HUD.speedVal, String(Math.round(speedCms * 0.036)));
+
+    // Power arc: launch charge / push charge (Colossal) / spin energy in flight
+    let powerRatio;
+    if (!isCorridor) {
+      powerRatio = State.KineticPushCharge;
+    } else if (State.RunPhase === 'LaunchPushOff') {
+      powerRatio = State.LaunchPushCharge;
+    } else {
+      const tanSpeed = Math.abs(State.AngularVelocityRadPerSec) * (Tuning.TetherLengthCm * 0.01);
+      powerRatio = (0.5 * Tuning.MaceMassKg * tanSpeed * tanSpeed) / 4500.0;
+    }
+    powerRatio = Math.max(0, Math.min(1, powerRatio));
+    const arcQ = Math.round(powerRatio * 500);
+    if (arcQ !== HUD.lastArcQ) {
+      HUD.lastArcQ = arcQ;
+      HUD.powerArc.style.strokeDashoffset = (HUD_ARC_CIRCUMFERENCE * (1 - arcQ / 500)).toFixed(2);
+      const hot = powerRatio > 0.85;
+      if (hot !== HUD.arcHot) {
+        HUD.arcHot = hot;
+        HUD.powerArc.classList.toggle('hot', hot);
+      }
+    }
   }
 
   // Engineering telemetry (only while the Dev Overlay is visible)
@@ -4171,12 +4308,6 @@
 
     const restartCrashBtn = document.getElementById('btn-restart-crash');
     if (restartCrashBtn) restartCrashBtn.addEventListener('click', restartRun);
-
-    const resetPill = document.getElementById('key-r');
-    if (resetPill) resetPill.addEventListener('click', restartRun);
-
-    const togglePill = document.getElementById('key-m');
-    if (togglePill) togglePill.addEventListener('click', toggleKickModel);
 
     // Step 6: Multi-Sector Selection Modal Wiring
     const sectorSelectBtn = document.getElementById('btn-sector-select');

@@ -17,6 +17,42 @@
 
   <!-- HUD Overlay -->
   <div id="hud-overlay">
+    <!-- Minimal Game HUD (Creator: "make the game screen minimalistic with only the information needed.") -->
+    <div id="game-hud" class="game-hud">
+      <!-- Top-center: progress to jump portal -->
+      <div id="hud-progress" class="hud-progress">
+        <div class="hud-progress-track">
+          <div id="hud-progress-fill" class="hud-progress-fill"></div>
+          <div id="hud-progress-marks" class="hud-progress-marks"></div>
+          <div id="hud-progress-portal" class="hud-progress-portal"></div>
+        </div>
+        <div id="hud-progress-text" class="hud-label hud-progress-text">0 / 1200 m</div>
+      </div>
+
+      <!-- Top-right: score + streak chip -->
+      <div class="hud-score">
+        <div id="hud-score-val" class="hud-score-val">0</div>
+        <div id="hud-streak" class="hud-streak hidden">x2</div>
+      </div>
+
+      <!-- Bottom-left: radar (Rule 4 instrument #2) -->
+      <div class="hud-radar">
+        <canvas id="radar-canvas" width="190" height="190"></canvas>
+      </div>
+
+      <!-- Bottom-center: speed dial + power arc (Rule 4 instruments #3 and #4) -->
+      <div class="hud-dial">
+        <svg class="hud-dial-svg" viewBox="0 0 120 120" aria-hidden="true">
+          <circle class="hud-dial-track" cx="60" cy="60" r="52"></circle>
+          <circle id="hud-power-arc" class="hud-dial-arc" cx="60" cy="60" r="52"></circle>
+        </svg>
+        <div class="hud-dial-readout">
+          <div id="hud-speed-val" class="hud-speed-val">0</div>
+          <div class="hud-label">KM/H</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Dev Overlay: engineering telemetry + tuning drawer (toggle with ` or F3, or ?dev=1) -->
     <div id="dev-overlay" class="dev-overlay hidden">
     <!-- Top Row: Dual Flight Panels -->
@@ -109,33 +145,12 @@
       <section class="hud-panel cockpit-instrumentation-panel">
         <div class="panel-header">
           <div class="brand">
-            <span class="brand-title">FLIGHT COCKPIT</span>
+            <span class="brand-title">COCKPIT EXTRAS</span>
             <span class="badge badge-amber">RULE 4 INSTRUMENTATION</span>
-          </div>
-          <div class="radar-tag">
-            <span class="radar-live-blip"></span>
-            <span>120m LOOKAHEAD</span>
           </div>
         </div>
 
         <div class="cockpit-grid">
-          <!-- Tactical Navigational Radar Mini-Map -->
-          <div class="radar-widget">
-            <div class="widget-title-row">
-              <span class="widget-label">TACTICAL NAV RADAR</span>
-              <span id="radar-contacts-count" class="widget-counter">0 CONTACTS</span>
-            </div>
-            <div class="radar-canvas-wrapper">
-              <canvas id="radar-canvas" width="190" height="190"></canvas>
-              <div class="radar-crosshair"></div>
-            </div>
-            <div class="radar-legend">
-              <span class="legend-item"><span class="legend-dot dot-asteroid"></span>Asteroid</span>
-              <span class="legend-item"><span class="legend-dot dot-debris"></span>Debris</span>
-              <span class="legend-item"><span class="legend-dot dot-gate"></span>Gate</span>
-            </div>
-          </div>
-
           <!-- Speedometer & Push Power Cluster -->
           <div class="speed-power-cluster">
             <!-- Cybernetic Dual-Unit Speedometer -->
@@ -613,43 +628,9 @@
 
     <!-- Center Crosshair / Orbit Ring Guide -->
     <div class="center-crosshair">
-      <div class="crosshair-ring"></div>
       <div class="crosshair-dot"></div>
     </div>
 
-    <!-- Bottom Controls & Key Prompts -->
-    <footer class="hud-panel controls-panel">
-      <div class="key-hints">
-        <div class="key-pill space-pill" id="key-space">
-          <kbd>SPACE</kbd>
-          <span id="key-space-label">CHARGE PUSH (LAUNCH)</span>
-        </div>
-        <div class="key-pill" id="key-a">
-          <kbd>A</kbd>
-          <span id="key-a-label">AIM LEFT / CCW SPIN</span>
-        </div>
-        <div class="key-pill release-pill" id="key-release">
-          <span class="pill-label">LET GO</span>
-          <span id="key-release-label">LAUNCH / KICK</span>
-        </div>
-        <div class="key-pill" id="key-d">
-          <kbd>D</kbd>
-          <span id="key-d-label">AIM RIGHT / CW SPIN</span>
-        </div>
-        <div class="key-pill toggle-pill" id="key-m">
-          <kbd>M</kbd>
-          <span>TOGGLE KICK MODEL</span>
-        </div>
-        <div class="key-pill reset-pill" id="key-r">
-          <kbd>R</kbd>
-          <span>RESTART RUN</span>
-        </div>
-      </div>
-      <div class="feel-tip">
-        <span class="icon">⚡</span>
-        <span id="feel-tip-text">Push-off to start. In flight: Hold <strong>A</strong> or <strong>D</strong> to spin mace, let go to whip away from debris!</span>
-      </div>
-    </footer>
 
   </div>
 

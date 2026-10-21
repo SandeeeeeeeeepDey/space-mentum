@@ -62,7 +62,7 @@ html, body {
   pointer-events: none;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: center;
   padding: 24px;
 }
 
@@ -2002,4 +2002,229 @@ html, body {
   z-index: 40;
   pointer-events: none;
   overflow: auto;
+}
+
+/* --- Minimal Game HUD ---
+   Creator request: "make the game screen minimalistic with only the information needed.
+   the interface doesnt look vary playagle and game like right now."
+   No glass panels: elements float on the scene with a soft text-shadow. Sizes use vmin clamps. */
+.game-hud {
+  --hud-margin: 24px;
+  --hud-dial: clamp(120px, 19vmin, 200px);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 3;
+  text-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
+}
+
+.hud-label {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Top-center: progress */
+.hud-progress {
+  position: absolute;
+  top: var(--hud-margin);
+  left: 50%;
+  width: 40%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  transition: opacity 0.2s ease-out;
+}
+
+.hud-progress-track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.6);
+}
+
+.hud-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  background: var(--color-cyan);
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.7);
+}
+
+.hud-progress-marks {
+  position: absolute;
+  inset: 0;
+}
+
+.hud-tick {
+  position: absolute;
+  top: -4px;
+  width: 2px;
+  height: 12px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.hud-tick.cleared { background: var(--color-emerald); }
+.hud-tick.missed { background: var(--color-rose); }
+
+.hud-diamond {
+  position: absolute;
+  top: -3px;
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  transform: rotate(45deg);
+  background: var(--color-gold);
+  box-shadow: 0 0 6px rgba(255, 183, 3, 0.7);
+}
+
+.hud-diamond.reached { opacity: 0.35; }
+
+.hud-progress-portal {
+  position: absolute;
+  right: -7px;
+  top: -5px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--color-cyan);
+  box-shadow: 0 0 8px currentColor;
+  background: rgba(5, 7, 13, 0.6);
+}
+
+.hud-progress-text {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+  color: rgba(241, 245, 249, 0.9);
+}
+
+/* Top-right: score */
+.hud-score {
+  position: absolute;
+  top: var(--hud-margin);
+  right: var(--hud-margin);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.hud-score-val {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: clamp(32px, 5vmin, 48px);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.hud-score-val.pop { animation: hudScorePop 120ms ease-out; }
+
+@keyframes hudScorePop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.14); }
+  100% { transform: scale(1); }
+}
+
+.hud-streak {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--color-gold);
+  border: 1px solid rgba(255, 183, 3, 0.55);
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: rgba(5, 7, 13, 0.45);
+}
+
+/* Bottom-left: radar (faint ring on a translucent dark disc) */
+.hud-radar {
+  position: absolute;
+  left: var(--hud-margin);
+  bottom: var(--hud-margin);
+  width: var(--hud-dial);
+  height: var(--hud-dial);
+  border-radius: 50%;
+  background: rgba(5, 7, 13, 0.45);
+  border: 1px solid rgba(0, 240, 255, 0.28);
+  overflow: hidden;
+}
+
+.hud-radar #radar-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Bottom-center: speed dial + power arc */
+.hud-dial {
+  position: absolute;
+  left: 50%;
+  bottom: var(--hud-margin);
+  width: var(--hud-dial);
+  height: var(--hud-dial);
+  transform: translateX(-50%);
+}
+
+.hud-dial-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  overflow: visible;
+}
+
+.hud-dial-track,
+.hud-dial-arc {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.hud-dial-track { stroke: rgba(255, 255, 255, 0.14); }
+
+.hud-dial-arc {
+  stroke: var(--color-cyan);
+  stroke-dasharray: 326.73;
+  stroke-dashoffset: 326.73;
+  filter: drop-shadow(0 0 4px rgba(0, 240, 255, 0.7));
+}
+
+.hud-dial-arc.hot {
+  stroke: var(--color-gold);
+  filter: drop-shadow(0 0 5px rgba(255, 183, 3, 0.85));
+}
+
+.hud-dial-readout {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.hud-speed-val {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: clamp(32px, 5vmin, 48px);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.9);
 }
