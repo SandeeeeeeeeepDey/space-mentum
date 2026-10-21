@@ -995,14 +995,8 @@
 
     playVoidDoomSound();
 
-    const modal = document.getElementById('void-doom-modal');
-    const horizonEl = document.getElementById('doom-horizon-val');
-    if (horizonEl) {
-      horizonEl.textContent = `${snapshot.lookaheadHorizon.toFixed(1)} SECONDS`;
-    }
-    if (modal) {
-      modal.classList.remove('hidden');
-    }
+    fillRunStats('void');
+    showResults('void-doom-modal');
   }
 
   function triggerKineticCrash(obstacle, impactSpeed) {
@@ -1012,14 +1006,12 @@
     playCrashSound();
     State.CameraTrauma = 1.0;
 
-    const modal = document.getElementById('crash-modal');
     const speedEl = document.getElementById('crash-speed-val');
-    if (speedEl) {
-      speedEl.textContent = `${impactSpeed.toFixed(0)} cm/s (${(impactSpeed * 0.036).toFixed(1)} km/h)`;
-    }
-    if (modal) {
-      modal.classList.remove('hidden');
-    }
+    if (speedEl) speedEl.textContent = `${Math.round(impactSpeed * 0.036)} km/h`;
+    const obstacleEl = document.getElementById('crash-obstacle-val');
+    if (obstacleEl) obstacleEl.textContent = (obstacle && obstacle.name) || 'an asteroid';
+    fillRunStats('crash');
+    showResults('crash-modal');
   }
 
   // --- Launch Push-Off Initiation & Departure (§1.4) ---
@@ -1572,33 +1564,21 @@
     const circle = document.getElementById('victory-grade-circle');
     const letter = document.getElementById('victory-grade-letter');
     const title = document.getElementById('victory-grade-title');
-    const desc = document.getElementById('victory-grade-desc');
 
-    if (circle && letter && title && desc) {
+    if (circle && letter && title) {
       circle.className = `grade-circle ${gradeClass}`;
       letter.textContent = grade;
       title.textContent = gradeTitle;
-      desc.textContent = gradeDesc;
     }
 
     const timeVal = document.getElementById('victory-time-val');
-    if (timeVal) timeVal.textContent = `${timeSec.toFixed(1)}s (Par: ${currentSector.parTimeSeconds.toFixed(1)}s)`;
-
-    const avgVal = document.getElementById('victory-avg-speed-val');
-    if (avgVal) avgVal.textContent = `${Math.round(avgSpeedCms)} cm/s (${(avgSpeedCms * 0.036).toFixed(1)} km/h)`;
-
-    const peakVal = document.getElementById('victory-peak-speed-val');
-    if (peakVal) peakVal.textContent = `${Math.round(peakSpeedCms)} cm/s (${(peakSpeedCms * 0.036).toFixed(1)} km/h)`;
+    if (timeVal) timeVal.textContent = `${timeSec.toFixed(1)}s (Par ${currentSector.parTimeSeconds.toFixed(1)}s)`;
 
     const gatesVal = document.getElementById('victory-gates-val');
-    const pct = SlalomTargets.length > 0 ? Math.round((State.CleanGatesCleared / SlalomTargets.length) * 100) : 100;
-    if (gatesVal) gatesVal.textContent = `${State.CleanGatesCleared} / ${SlalomTargets.length} (${pct}% CLEAN)`;
-
-    const strikesVal = document.getElementById('victory-strikes-val');
-    if (strikesVal) strikesVal.textContent = `${State.StrikeCount} LANDED (+${State.StrikeCount * 300} PTS)`;
+    if (gatesVal) gatesVal.textContent = `${State.CleanGatesCleared} / ${SlalomTargets.length}`;
 
     const scoreVal = document.getElementById('victory-score-val');
-    if (scoreVal) scoreVal.textContent = `${finalScore.toLocaleString()} PTS`;
+    if (scoreVal) scoreVal.textContent = finalScore.toLocaleString();
 
     const pbTag = document.getElementById('leaderboard-pb-tag');
     if (pbTag) pbTag.classList.toggle('hidden', !isNewPB);
@@ -1608,17 +1588,14 @@
     if (tbody) {
       tbody.innerHTML = '';
       const entries = profile.leaderboards[State.CurrentSectorIndex] || [];
-      entries.forEach((e, i) => {
+      entries.slice(0, 5).forEach((e, i) => {
         const tr = document.createElement('tr');
         if (i === 0) tr.className = 'rank-1';
         tr.innerHTML = `
           <td>${i + 1}</td>
-          <td>${e.callsign}</td>
           <td>${e.score.toLocaleString()}</td>
           <td><span class="badge ${e.grade.startsWith('S') ? 'badge-amber' : ''}">${e.grade}</span></td>
           <td>${e.time}</td>
-          <td>${e.speed}</td>
-          <td>${e.date}</td>
         `;
         tbody.appendChild(tr);
       });
@@ -1628,11 +1605,9 @@
     const nextBtn = document.getElementById('btn-next-sector');
     if (nextBtn) {
       if (State.CurrentSectorIndex < 3) {
-        nextBtn.textContent = `WARP TO SECTOR ${State.CurrentSectorIndex + 1} ❯`;
-        nextBtn.style.display = 'block';
+        nextBtn.textContent = 'NEXT SECTOR';
       } else {
-        nextBtn.textContent = 'ALL SECTORS MASTERED ★';
-        nextBtn.style.display = 'block';
+        nextBtn.textContent = 'BACK TO SECTOR 1';
       }
     }
 
@@ -1641,7 +1616,7 @@
     playPortalWarpFanfare();
     triggerWarpJumpFlash(currentSector.portalThemeColorStr);
 
-    if (modal) modal.classList.remove('hidden');
+    showResults('sector-completed-modal');
   }
 
   function triggerWarpJumpFlash(colorStr) {
@@ -4122,7 +4097,40 @@
     ['set-prox', 'ProximityAlarmVolume', 'set-prox-val', 'slider-prox-alarm-vol', 'val-prox-alarm-vol'],
   ];
 
+  // Results (crash / void / victory): UI.screen = 'results' at once (blocks pause, keeps sim rendering),
+  // the card itself appears after a short beat so the crash flash / shake is seen first.
+  const RESULTS_DELAY_MS = 600;
+
+  function showResults(modalId) {
+    UI.screen = 'results';
+    UI.resultsModal = modalId;
+    document.body.dataset.screen = 'results';
+    clearHeldInput();
+    clearTimeout(UI.resultsTimer);
+    UI.resultsTimer = setTimeout(() => {
+      if (UI.screen !== 'results' || UI.resultsModal !== modalId) return;
+      const modal = document.getElementById(modalId);
+      if (modal) modal.classList.remove('hidden');
+      UI.menuIndex = 0;
+      selectMenuItem(0);
+    }, RESULTS_DELAY_MS);
+  }
+
+  // Distance / score / personal best for the crash + void cards
+  function fillRunStats(prefix) {
+    const dist = document.getElementById(`${prefix}-dist-val`);
+    const score = document.getElementById(`${prefix}-score-val`);
+    const best = document.getElementById(`${prefix}-best-val`);
+    if (dist) dist.textContent = `${Math.max(0, Math.round(State.CoMPosition.x * 0.01))} m`;
+    if (score) score.textContent = State.CurrentCompositeScore.toLocaleString();
+    if (best) {
+      const pb = Tuning.ActiveScreenMode !== 'ColossalBelt' ? SaveGame.getProfile().personalBests[State.CurrentSectorIndex] : null;
+      best.textContent = pb ? pb.compositeScore.toLocaleString() : '—';
+    }
+  }
+
   function showScreen(name) {
+    clearTimeout(UI.resultsTimer);
     UI.screen = name;
     closeSubScreen(true);
     document.body.dataset.screen = name;
@@ -4223,6 +4231,7 @@
     if (UI.sub === 'sector') return null;
     if (UI.screen === 'title') return document.getElementById('title-menu');
     if (UI.screen === 'paused') return document.getElementById('pause-menu');
+    if (UI.screen === 'results') return document.querySelector('.results-modal:not(.hidden) .menu-list');
     return null;
   }
 
@@ -4278,8 +4287,11 @@
       case 'settings': openSubScreen('settings'); break;
       case 'back': closeSubScreen(); break;
       case 'resume': resumeGame(); break;
-      case 'restart': restartRun(); break;
-      case 'quit': quitToTitle(); break;
+      case 'restart':
+      case 'retry': restartRun(); break;
+      case 'quit':
+      case 'menu': quitToTitle(); break;
+      case 'next': loadSector(State.CurrentSectorIndex < 3 ? State.CurrentSectorIndex + 1 : 1); break;
     }
   }
 
@@ -4689,13 +4701,6 @@
       });
     }
 
-    // Modal retry buttons
-    const restartVoidBtn = document.getElementById('btn-restart-void');
-    if (restartVoidBtn) restartVoidBtn.addEventListener('click', restartRun);
-
-    const restartCrashBtn = document.getElementById('btn-restart-crash');
-    if (restartCrashBtn) restartCrashBtn.addEventListener('click', restartRun);
-
     // Step 6: Multi-Sector Selection Modal Wiring
     const sectorSelectBtn = document.getElementById('btn-sector-select');
     const sectorModal = document.getElementById('sector-select-modal');
@@ -4728,26 +4733,6 @@
         if (sectorModal) sectorModal.classList.add('hidden');
       });
     });
-
-    // Step 6: Victory Modal Actions
-    const nextSectorBtn = document.getElementById('btn-next-sector');
-    if (nextSectorBtn) {
-      nextSectorBtn.addEventListener('click', () => {
-        const victoryModal = document.getElementById('sector-completed-modal');
-        if (victoryModal) victoryModal.classList.add('hidden');
-        const nextIdx = State.CurrentSectorIndex < 3 ? State.CurrentSectorIndex + 1 : 1;
-        loadSector(nextIdx);
-      });
-    }
-
-    const restartVictoryBtn = document.getElementById('btn-restart-victory');
-    if (restartVictoryBtn) {
-      restartVictoryBtn.addEventListener('click', () => {
-        const victoryModal = document.getElementById('sector-completed-modal');
-        if (victoryModal) victoryModal.classList.add('hidden');
-        restartRun();
-      });
-    }
 
     // Step 8 Sliders & Buttons
     bindSlider('slider-colossal-scale', Tuning, 'ColossalAsteroidScale', 'val-colossal-scale', 1);

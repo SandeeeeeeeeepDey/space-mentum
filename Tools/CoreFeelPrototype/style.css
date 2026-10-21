@@ -2438,3 +2438,74 @@ body[data-screen="title"] #game-hud,
 body[data-screen="title"] #aim-crosshair-3d,
 body[data-screen="title"] #kinetic-target-reticle,
 body[data-screen="title"] .center-crosshair { display: none; }
+
+/* Results screens: crash / void / victory. Same scrim as the menus; card fades + scales in
+   (modalEnter) after a short beat so the crash flash is seen first. */
+.failure-modal.results-modal {
+  background: rgba(5, 7, 13, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.results-card {
+  max-width: 520px;
+  padding: 32px 36px;
+}
+
+.results-line {
+  font-size: 15px;
+  color: var(--text-muted);
+  margin-bottom: 22px;
+}
+
+.results-stats {
+  display: flex;
+  justify-content: space-around;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.results-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+
+.results-stat-val {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.results-card .grade-container {
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 20px 0;
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.results-card .grade-circle {
+  width: 112px;
+  height: 112px;
+  font-size: 58px;
+}
+
+.results-card .grade-title { font-size: 18px; text-align: center; }
+
+.results-card .modal-leaderboard-section { margin: 0 0 20px 0; }
+.results-card .leaderboard-table-container { max-height: none; }
+
+.results-card .menu-list { text-align: left; }
+
+/* The in-flight HUD steps aside while a results card is up */
+body[data-screen="results"] #game-hud,
+body[data-screen="results"] #aim-crosshair-3d,
+body[data-screen="results"] #kinetic-target-reticle,
+body[data-screen="results"] .center-crosshair { opacity: 0; transition: opacity 0.25s ease-out; }
+
+.results-card .pb-tag { color: var(--color-gold); }

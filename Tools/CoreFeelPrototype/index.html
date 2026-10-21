@@ -437,69 +437,33 @@
       </div>
     </div>
 
-    <!-- Dramatic Rule 2 Win Modal: Sector Jump Portal Breached -->
-    <div id="sector-completed-modal" class="failure-modal victory-modal hidden">
-      <div class="modal-card victory-card">
-        <div class="modal-glitch-badge victory-badge">SECTOR BREACHED</div>
-        <h1 class="modal-headline victory-glow">JUMP PORTAL CLEAR</h1>
-        <p class="modal-quote">"The ultimate goal is to navigate the dense asteroid field/debris and reach a designated spatial coordinate using only momentum mechanics."</p>
-
-        <!-- Performance Grade Badge -->
+    <!-- Results screens (Creator: "only the information needed"): victory / void / crash -->
+    <!-- Victory: Sector Jump Portal Breached -->
+    <div id="sector-completed-modal" class="failure-modal victory-modal results-modal hidden">
+      <div class="modal-card victory-card results-card">
         <div class="grade-container">
           <div class="grade-circle grade-s" id="victory-grade-circle">
             <span id="victory-grade-letter">S</span>
           </div>
-          <div class="grade-title-group">
-            <div id="victory-grade-title" class="grade-title">ORBITAL MAESTRO</div>
-            <div id="victory-grade-desc" class="grade-desc">Flawless Newtonian conservation & momentum control.</div>
-          </div>
+          <div id="victory-grade-title" class="grade-title">ORBITAL MAESTRO</div>
+          <span id="leaderboard-pb-tag" class="pb-tag hud-label hidden">&#9733; NEW BEST</span>
         </div>
 
-        <!-- Flight Debrief Metrics Grid -->
-        <div class="modal-diagnostics victory-grid">
-          <div class="diag-row">
-            <span class="diag-label">FLIGHT TIME:</span>
-            <span id="victory-time-val" class="diag-val cyan">34.2s (Par: 38.0s)</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">AVERAGE VELOCITY:</span>
-            <span id="victory-avg-speed-val" class="diag-val">3,120 cm/s (112.3 km/h)</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">PEAK INSTANTANEOUS SPEED:</span>
-            <span id="victory-peak-speed-val" class="diag-val">3,890 cm/s (140.0 km/h)</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">SLALOM GATES CLEARED:</span>
-            <span id="victory-gates-val" class="diag-val emerald">5 / 5 (100% CLEAN)</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">EXTERNAL MACE STRIKES:</span>
-            <span id="victory-strikes-val" class="diag-val gold">3 LANDED (+900 PTS)</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">COMPOSITE KINETIC SCORE:</span>
-            <span id="victory-score-val" class="diag-val highlight-gold">14,850 PTS</span>
-          </div>
+        <div class="results-stats">
+          <div class="results-stat"><span class="hud-label">Time</span><span id="victory-time-val" class="results-stat-val">34.2s (Par 38.0s)</span></div>
+          <div class="results-stat"><span class="hud-label">Score</span><span id="victory-score-val" class="results-stat-val">14,850</span></div>
+          <div class="results-stat"><span class="hud-label">Gates</span><span id="victory-gates-val" class="results-stat-val">5 / 5</span></div>
         </div>
 
-        <!-- High Score Leaderboard Table -->
         <div class="modal-leaderboard-section">
-          <div class="leaderboard-header-row">
-            <span>SECTOR LEADERBOARD (PERSONAL BESTS)</span>
-            <span id="leaderboard-pb-tag" class="pb-tag hidden">★ NEW PERSONAL BEST!</span>
-          </div>
           <div class="leaderboard-table-container">
             <table class="leaderboard-table">
               <thead>
                 <tr>
                   <th>#</th>
-                  <th>PILOT</th>
                   <th>SCORE</th>
                   <th>GRADE</th>
                   <th>TIME</th>
-                  <th>SPEED</th>
-                  <th>DATE</th>
                 </tr>
               </thead>
               <tbody id="leaderboard-tbody">
@@ -508,56 +472,45 @@
           </div>
         </div>
 
-        <!-- Action Buttons -->
-        <div class="modal-button-group">
-          <button id="btn-next-sector" class="modal-action-btn primary-btn">WARP TO NEXT SECTOR ❯</button>
-          <button id="btn-restart-victory" class="modal-action-btn secondary-btn">REPLAY SECTOR [R]</button>
+        <div class="menu-list">
+          <button id="btn-next-sector" class="menu-item" data-action="next">NEXT SECTOR</button>
+          <button id="btn-restart-victory" class="menu-item" data-action="retry">RETRY<span class="menu-item-key">R</span></button>
+          <button class="menu-item" data-action="menu">MENU</button>
         </div>
       </div>
     </div>
 
-    <!-- Dramatic Rule 3 Failure Modal 1: Lost to the Void -->
-    <div id="void-doom-modal" class="failure-modal void-modal hidden">
-      <div class="modal-card">
-        <div class="modal-glitch-badge">EXISTENTIAL DREAD</div>
+    <!-- Failure 1: Lost to the Void -->
+    <div id="void-doom-modal" class="failure-modal void-modal results-modal hidden">
+      <div class="modal-card results-card">
         <h1 class="modal-headline void-glow">LOST TO THE VOID</h1>
-        <p class="modal-quote">"If the engine calculates the player's trajectory will not intersect... trigger a dramatic failure state in the next 13 to 40 seconds."</p>
-        <div class="modal-diagnostics">
-          <div class="diag-row">
-            <span class="diag-label">FAILURE VECTOR:</span>
-            <span class="diag-val red">UNREACHABLE TRAJECTORY</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">LOOKAHEAD HORIZON:</span>
-            <span id="doom-horizon-val" class="diag-val">40.0 SECONDS</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">STRIKEABLE ANCHORS:</span>
-            <span class="diag-val red">ZERO REACHABLE</span>
-          </div>
+        <p class="results-line">Nothing left in reach.</p>
+        <div class="results-stats">
+          <div class="results-stat"><span class="hud-label">Distance</span><span id="void-dist-val" class="results-stat-val">0 m</span></div>
+          <div class="results-stat"><span class="hud-label">Score</span><span id="void-score-val" class="results-stat-val">0</span></div>
+          <div class="results-stat"><span class="hud-label">Best</span><span id="void-best-val" class="results-stat-val">&mdash;</span></div>
         </div>
-        <p class="modal-hint">The run was mercilessly terminated to preserve high-adrenaline pacing.</p>
-        <button id="btn-restart-void" class="modal-restart-btn">RETRY RUN [PRESS R]</button>
+        <div class="menu-list">
+          <button id="btn-restart-void" class="menu-item" data-action="retry">RETRY<span class="menu-item-key">R</span></button>
+          <button class="menu-item" data-action="menu">MENU</button>
+        </div>
       </div>
     </div>
 
-    <!-- Dramatic Rule 3 Failure Modal 2: Kinetic Impact Crash -->
-    <div id="crash-modal" class="failure-modal crash-modal hidden">
-      <div class="modal-card">
-        <div class="modal-glitch-badge red-badge">KINETIC OBLITERATION</div>
-        <h1 class="modal-headline crash-glow">KINETIC IMPACT</h1>
-        <p class="modal-quote">"If the player's main body hitbox intersects with an obstacle at relative speed exceeding threshold, the ship is destroyed."</p>
-        <div class="modal-diagnostics">
-          <div class="diag-row">
-            <span class="diag-label">COLLISION VELOCITY:</span>
-            <span id="crash-speed-val" class="diag-val red">3,040 cm/s</span>
-          </div>
-          <div class="diag-row">
-            <span class="diag-label">HULL INTEGRITY:</span>
-            <span class="diag-val red">0% (CATASTROPHIC FAILURE)</span>
-          </div>
+    <!-- Failure 2: Kinetic Impact Crash -->
+    <div id="crash-modal" class="failure-modal crash-modal results-modal hidden">
+      <div class="modal-card results-card">
+        <h1 class="modal-headline crash-glow">IMPACT</h1>
+        <p class="results-line">Hit <span id="crash-obstacle-val">an asteroid</span> at <span id="crash-speed-val">109 km/h</span></p>
+        <div class="results-stats">
+          <div class="results-stat"><span class="hud-label">Distance</span><span id="crash-dist-val" class="results-stat-val">0 m</span></div>
+          <div class="results-stat"><span class="hud-label">Score</span><span id="crash-score-val" class="results-stat-val">0</span></div>
+          <div class="results-stat"><span class="hud-label">Best</span><span id="crash-best-val" class="results-stat-val">&mdash;</span></div>
         </div>
-        <button id="btn-restart-crash" class="modal-restart-btn">RETRY RUN [PRESS R]</button>
+        <div class="menu-list">
+          <button id="btn-restart-crash" class="menu-item" data-action="retry">RETRY<span class="menu-item-key">R</span></button>
+          <button class="menu-item" data-action="menu">MENU</button>
+        </div>
       </div>
     </div>
 
