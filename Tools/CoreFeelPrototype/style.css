@@ -30,6 +30,10 @@
   user-select: none;
 }
 
+.hidden {
+  display: none !important;
+}
+
 html, body {
   width: 100%;
   height: 100%;
@@ -1552,5 +1556,450 @@ html, body {
   transition: width 0.08s ease;
 }
 
+/* ==============================================================================
+   STEP 8: COLOSSAL ASTEROIDS, WIDE BELT & KINETIC PUSH MANIPULATION STYLES
+   ============================================================================== */
+
+/* Screen Mode Switcher in Header */
+.screen-mode-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(10, 16, 28, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 3px;
+  margin-left: 14px;
+  gap: 4px;
+}
+
+.btn-screen-tab {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-screen-tab:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.btn-screen-tab.active {
+  background: rgba(0, 240, 255, 0.15);
+  color: var(--color-cyan);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.25);
+  border: 1px solid rgba(0, 240, 255, 0.4);
+}
+
+.btn-screen-tab.highlight-colossal.active {
+  background: rgba(245, 158, 11, 0.2);
+  color: #f59e0b;
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.35);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+}
+
+.tab-badge-glow {
+  font-size: 9px;
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  color: #000;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  animation: badgePulse 1.8s infinite alternate;
+}
+
+@keyframes badgePulse {
+  0% { transform: scale(0.96); opacity: 0.9; }
+  100% { transform: scale(1.05); opacity: 1; }
+}
+
+.pulse-amber-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 8px #f59e0b;
+  animation: dotFlash 0.8s infinite alternate;
+}
+
+@keyframes dotFlash {
+  0% { opacity: 0.4; transform: scale(0.85); }
+  100% { opacity: 1; transform: scale(1.15); }
+}
+
+/* Colossal Mode Banner */
+.colossal-mode-banner {
+  position: absolute;
+  bottom: 84px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: auto;
+  min-width: 520px;
+  max-width: 660px;
+  background: rgba(10, 16, 28, 0.94);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.8), 0 0 35px rgba(245, 158, 11, 0.25);
+  border-radius: 14px;
+  padding: 12px 18px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  z-index: 90;
+  pointer-events: auto;
+  animation: bannerFadeIn 0.3s ease-out;
+}
+
+@keyframes bannerFadeIn {
+  from { opacity: 0; transform: translate(-50%, 15px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.colossal-mode-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 800;
+  color: #f59e0b;
+  letter-spacing: 0.06em;
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 6px;
+}
+
+.btn-close-banner {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-close-banner:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.colossal-mode-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.colossal-rule-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.colossal-rule-item strong {
+  color: #fff;
+}
+
+.colossal-rule-item.alert-rule {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.12);
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.colossal-mode-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.btn-colossal-btn {
+  flex: 1;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  background: rgba(0, 240, 255, 0.12);
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  color: var(--color-cyan);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.btn-colossal-btn:hover {
+  background: rgba(0, 240, 255, 0.25);
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.4);
+}
+
+.btn-colossal-btn.btn-push-gradient {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.3), rgba(239, 68, 68, 0.3));
+  border-color: rgba(245, 158, 11, 0.6);
+  color: #f59e0b;
+}
+
+.btn-colossal-btn.btn-push-gradient:hover {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.5), rgba(239, 68, 68, 0.5));
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.5);
+  color: #fff;
+}
+
+/* 3D Dynamic Aim Crosshair */
+.aim-crosshair-3d {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  transition: transform 0.05s ease-out;
+}
+
+.crosshair-bracket {
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 300;
+  color: rgba(0, 240, 255, 0.7);
+  text-shadow: 0 0 10px rgba(0, 240, 255, 0.8);
+}
+
+.crosshair-dot-ring {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px dashed rgba(0, 240, 255, 0.85);
+  animation: reticleSpin 8s linear infinite;
+}
+
+.crosshair-aim-label {
+  position: absolute;
+  bottom: -22px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: rgba(0, 240, 255, 0.8);
+  white-space: nowrap;
+}
+
+/* Cybernetic Kinetic Lock-On Target HUD */
+.kinetic-target-reticle {
+  position: absolute;
+  pointer-events: none;
+  z-index: 110;
+  transform: translate(-50%, -50%);
+  transition: transform 0.08s ease-out;
+}
+
+.reticle-box {
+  width: 110px;
+  height: 110px;
+  position: relative;
+  margin: 0 auto;
+}
+
+.reticle-corner {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-color: #00f0ff;
+  border-style: solid;
+}
+
+.reticle-corner.tl {
+  top: 0; left: 0;
+  border-width: 2.5px 0 0 2.5px;
+}
+
+.reticle-corner.tr {
+  top: 0; right: 0;
+  border-width: 2.5px 2.5px 0 0;
+}
+
+.reticle-corner.bl {
+  bottom: 0; left: 0;
+  border-width: 0 0 2.5px 2.5px;
+}
+
+.reticle-corner.br {
+  bottom: 0; right: 0;
+  border-width: 0 2.5px 2.5px 0;
+}
+
+.reticle-rot-ring {
+  position: absolute;
+  top: 15px; left: 15px;
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  border: 1.5px dotted rgba(0, 240, 255, 0.6);
+  animation: reticleSpin 6s linear infinite;
+}
+
+.reticle-center-marker {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: #00f0ff;
+  box-shadow: 0 0 8px #00f0ff;
+}
+
+@keyframes reticleSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.kinetic-target-reticle.critical .reticle-corner,
+.kinetic-target-reticle.critical .reticle-center-marker {
+  border-color: #ef4444 !important;
+  background-color: #ef4444 !important;
+  box-shadow: 0 0 16px #ef4444 !important;
+}
+
+.kinetic-target-reticle.critical .reticle-rot-ring {
+  border-color: rgba(239, 68, 68, 0.8) !important;
+  animation-duration: 1.5s !important;
+}
+
+/* Target Card */
+.target-card {
+  margin-top: 8px;
+  background: rgba(6, 12, 24, 0.9);
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  border-radius: 8px;
+  padding: 10px 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  width: 250px;
+}
+
+.target-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 4px;
+}
+
+.target-tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  background: rgba(0, 240, 255, 0.2);
+  color: var(--color-cyan);
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+}
+
+.target-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.target-metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.t-lbl {
+  color: var(--text-dim);
+}
+
+.t-val {
+  font-weight: 700;
+  color: #fff;
+}
+
+.target-dilemma-alert {
+  margin-top: 8px;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.6);
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: #fca5a5;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  animation: dilemmaFlash 0.3s infinite alternate;
+}
+
+@keyframes dilemmaFlash {
+  0% { opacity: 0.7; transform: scale(0.98); }
+  100% { opacity: 1; transform: scale(1.02); }
+}
+
+/* Push Banners */
+.push-banner {
+  border-color: rgba(0, 240, 255, 0.8) !important;
+  box-shadow: 0 0 35px rgba(0, 240, 255, 0.5) !important;
+}
+
+.overpower-banner {
+  border-color: rgba(239, 68, 68, 0.85) !important;
+  background: rgba(30, 4, 8, 0.92) !important;
+  box-shadow: 0 0 40px rgba(239, 68, 68, 0.6) !important;
+  animation: overpowerShake 0.4s ease-out;
+}
+
+@keyframes overpowerShake {
+  0%, 100% { transform: translate(-50%, 0); }
+  20%, 60% { transform: translate(-54%, 0); }
+  40%, 80% { transform: translate(-46%, 0); }
+}
+
+.kinetic-card {
+  border-color: rgba(245, 158, 11, 0.35) !important;
+}
 
 
+
+
+
+/* --- Dev Overlay ---
+   Creator request: "make the game screen minimalistic with only the information needed.
+   the interface doesnt look vary playagle and game like right now."
+   All engineering telemetry + tuning sliders live here, hidden by default (` / F3 / ?dev=1). */
+.dev-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  z-index: 40;
+  pointer-events: none;
+  overflow: auto;
+}

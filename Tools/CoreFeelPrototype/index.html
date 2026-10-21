@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=5.1">
+  <link rel="stylesheet" href="style.css?v=8.0">
   <!-- Three.js for 3D Viewport & Cinematic Chase Camera -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
@@ -17,6 +17,8 @@
 
   <!-- HUD Overlay -->
   <div id="hud-overlay">
+    <!-- Dev Overlay: engineering telemetry + tuning drawer (toggle with ` or F3, or ?dev=1) -->
+    <div id="dev-overlay" class="dev-overlay hidden">
     <!-- Top Row: Dual Flight Panels -->
     <div class="hud-top-row">
       <!-- Top-Left Telemetry Box -->
@@ -26,6 +28,12 @@
             <span class="brand-title">SPACEMENTUM</span>
             <span class="badge">PHYSICS MIRROR</span>
             <button id="btn-sector-select" class="badge badge-sector" title="Switch Sector Gauntlet">SECTOR 1: PERSEUS SHALLOWS ▾</button>
+            <div class="screen-mode-toggle-group">
+              <button id="btn-screen-gauntlet" class="btn-screen-tab active" title="Switch to Slalom Gauntlet Corridor">CORRIDOR</button>
+              <button id="btn-screen-colossal" class="btn-screen-tab highlight-colossal" title="Switch to Screen where Asteroids are Much Bigger & Outer Belt Expansive">
+                COLOSSAL BELT <span class="tab-badge-glow">PUSH FIELD</span>
+              </button>
+            </div>
           </div>
           <div class="status-indicator">
             <span class="pulse-dot"></span>
@@ -83,6 +91,16 @@
             <div class="metric-label">KINETIC FLIGHT SCORE</div>
             <div id="stat-score" class="metric-value highlight-gold">0 PTS</div>
             <div id="stat-score-sub" class="metric-sub">STREAK: 0x | GRADE: S</div>
+          </div>
+          <div class="metric-card kinetic-card" id="card-kinetic-target">
+            <div class="metric-label">KINETIC TARGET LOCK [F]</div>
+            <div id="stat-target-status" class="metric-value highlight-cyan">NO TARGET</div>
+            <div id="stat-target-metrics" class="metric-sub">Aim at asteroid to acquire</div>
+          </div>
+          <div class="metric-card kinetic-card" id="card-push-force">
+            <div class="metric-label">KINETIC PUSH [SPACE]</div>
+            <div id="stat-push-force" class="metric-value highlight-gold">0.0 kN</div>
+            <div id="stat-push-status" class="metric-sub">Capacitor: 0% Ready</div>
           </div>
         </div>
       </header>
@@ -176,6 +194,130 @@
       </section>
     </div>
 
+    <!-- Side Tuning Drawer (Collapsible) -->
+    <aside class="tuning-drawer" id="tuning-drawer">
+      <button class="drawer-toggle" id="drawer-toggle" title="Toggle Live Physics Knobs">
+        <span>⚙ FEEL KNOBS</span>
+      </button>
+      <div class="drawer-content">
+        <h3>PHYSICS FEEL KNOBS</h3>
+        <p class="drawer-desc">Direct mirror of <code>FMaceOrbitTuning</code>, <code>FMomentumTransferTuning</code> & <code>FLaunchPushOffParameters</code>.</p>
+
+        <div class="slider-group">
+          <label>Launch Departure Speed: <span id="val-launch-speed">3000</span> cm/s (108 km/h)</label>
+          <input type="range" id="slider-launch-speed" min="1500" max="4500" value="3000" step="100">
+        </div>
+
+        <div class="slider-group">
+          <label>Tether Length (r): <span id="val-tether">180</span> cm</label>
+          <input type="range" id="slider-tether" min="80" max="300" value="180" step="5">
+        </div>
+
+        <div class="slider-group">
+          <label>Mace Mass (m_m): <span id="val-mace-mass">40</span> kg</label>
+          <input type="range" id="slider-mace-mass" min="5" max="120" value="40" step="1">
+        </div>
+
+        <div class="slider-group">
+          <label>Spin Acceleration: <span id="val-accel">1440</span> °/s²</label>
+          <input type="range" id="slider-accel" min="360" max="3600" value="1440" step="60">
+        </div>
+
+        <div class="slider-group">
+          <label>Max Angular Speed: <span id="val-max-speed">1080</span> °/s (3 rev/s)</label>
+          <input type="range" id="slider-max-speed" min="360" max="2160" value="1080" step="60">
+        </div>
+
+        <div class="slider-group">
+          <label>Impulse Efficiency (α): <span id="val-alpha">0.65</span></label>
+          <input type="range" id="slider-alpha" min="0.1" max="1.5" value="0.65" step="0.05">
+        </div>
+
+        <div class="slider-group">
+          <label>Lateral Damping (λ): <span id="val-damping">1.50</span> /s</label>
+          <input type="range" id="slider-damping" min="0.2" max="4.0" value="1.5" step="0.1">
+        </div>
+
+        <div class="drawer-section-divider">STEP 5: VISUALS & DYNAMIC AUDIO</div>
+
+        <div class="slider-group">
+          <label>Speed FOV Dilation: <span id="val-fov-dilation">25</span>° (Max 105°)</label>
+          <input type="range" id="slider-fov-dilation" min="5" max="40" value="25" step="1">
+        </div>
+
+        <div class="slider-group">
+          <label>Camera Dutch Roll Bank: <span id="val-dutch-roll">4.5</span>°</label>
+          <input type="range" id="slider-dutch-roll" min="0" max="10" value="4.5" step="0.5">
+        </div>
+
+        <div class="slider-group">
+          <label>Metasound Master Volume: <span id="val-audio-volume">100</span>%</label>
+          <input type="range" id="slider-audio-volume" min="0" max="100" value="100" step="5">
+        </div>
+
+        <div class="drawer-section-divider">STEP 7: ASSET PIPELINE & POLISH</div>
+
+        <div class="slider-group">
+          <label>Engine Hum Volume: <span id="val-engine-hum">45</span>%</label>
+          <input type="range" id="slider-engine-hum" min="0" max="100" value="45" step="5">
+        </div>
+
+        <div class="slider-group">
+          <label>Proximity Alarm Volume: <span id="val-prox-alarm-vol">75</span>%</label>
+          <input type="range" id="slider-prox-alarm-vol" min="0" max="100" value="75" step="5">
+        </div>
+
+        <div class="slider-group">
+          <label>Proximity Alarm Distance: <span id="val-prox-dist">25</span> m</label>
+          <input type="range" id="slider-prox-dist" min="15" max="45" value="25" step="1">
+        </div>
+
+        <div class="slider-group">
+          <label>Mace Plasma Heat Multiplier: <span id="val-plasma-heat">100</span>%</label>
+          <input type="range" id="slider-plasma-heat" min="50" max="250" value="100" step="10">
+        </div>
+
+        <div class="drawer-section-divider">STEP 8: COLOSSAL ASTEROIDS & KINETIC PUSH</div>
+
+        <div class="slider-group">
+          <label>Colossal Asteroid Scale: <span id="val-colossal-scale">1.0</span>x (Up to 35m)</label>
+          <input type="range" id="slider-colossal-scale" min="0.5" max="3.0" value="1.0" step="0.1">
+        </div>
+
+        <div class="slider-group">
+          <label>Outer Belt Width Radius: <span id="val-belt-radius">350</span> m</label>
+          <input type="range" id="slider-belt-radius" min="150" max="600" value="350" step="25">
+        </div>
+
+        <div class="slider-group">
+          <label>Incoming Asteroid Speed: <span id="val-incoming-speed">1600</span> cm/s (58 km/h)</label>
+          <input type="range" id="slider-incoming-speed" min="600" max="3200" value="1600" step="100">
+        </div>
+
+        <div class="slider-group">
+          <label>Max Kinetic Push Force: <span id="val-push-force">50</span> kN</label>
+          <input type="range" id="slider-push-force" min="10" max="100" value="50" step="5">
+        </div>
+
+        <div class="slider-group">
+          <label>Critical Danger Distance: <span id="val-crit-dist">18</span> m</label>
+          <input type="range" id="slider-crit-dist" min="8" max="35" value="18" step="1">
+        </div>
+
+        <div class="slider-group">
+          <label>Asteroid Overpower Ratio: <span id="val-overpower-ratio">1.35</span>x</label>
+          <input type="range" id="slider-overpower-ratio" min="0.5" max="3.0" value="1.35" step="0.05">
+        </div>
+
+        <div class="button-row">
+          <button id="btn-reset-feel" class="btn-secondary">RESET DEFAULTS</button>
+          <button id="btn-toggle-blind-math" class="btn-primary">BLIND MATH: ON</button>
+          <button id="btn-toggle-gizmos" class="btn-secondary">GIZMOS: OFF</button>
+        </div>
+      </div>
+    </aside>
+    </div>
+
     <!-- Centered Launch Guidance Banner (Visible during LaunchPushOff) -->
     <div id="launch-guidance-banner" class="launch-guidance-banner">
       <div class="launch-header-tag">CELESTIAL ORIGIN ANCHOR (X = 0)</div>
@@ -191,6 +333,101 @@
         <span class="charge-btn-icon">⚡</span>
         <span id="charge-btn-text">HOLD [SPACE] TO CHARGE PUSH</span>
       </button>
+    </div>
+
+    <!-- Screen 2: Colossal Asteroid Belt & Kinetic Field Guidance Banner -->
+    <div id="colossal-mode-banner" class="colossal-mode-banner hidden">
+      <div class="colossal-mode-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="pulse-amber-dot"></span>
+          <span>COLOSSAL ASTEROID BELT & KINETIC PUSH FIELD ACTIVE</span>
+        </div>
+        <button id="btn-close-colossal-banner" class="btn-close-banner" title="Minimize / Dismiss Guidance">✕ DISMISS</button>
+      </div>
+      <div class="colossal-mode-body">
+        <div class="colossal-rule-item">
+          <span class="rule-icon">🪐</span>
+          <span><strong>Monolithic Asteroids:</strong> Much bigger (up to 35m across) with authentic zero-g tumble and crushing mass.</span>
+        </div>
+        <div class="colossal-rule-item">
+          <span class="rule-icon">🌌</span>
+          <span><strong>Vast Outer Belt:</strong> Expands far outside camera view (350m radius) into deep space.</span>
+        </div>
+        <div class="colossal-rule-item">
+          <span class="rule-icon">📐</span>
+          <span><strong>Multi-Angle Trajectories:</strong> Inbound from variable angles, always with a forward closing vector (Vx &lt; 0).</span>
+        </div>
+        <div class="colossal-rule-item">
+          <span class="rule-icon">🎯</span>
+          <span><strong>Aim & Lock:</strong> Move cursor to aim at asteroid, press <strong>[CLICK / F]</strong> to lock on.</span>
+        </div>
+        <div class="colossal-rule-item">
+          <span class="rule-icon">⚡</span>
+          <span><strong>Kinetic Push:</strong> Hold <strong>[SPACE / RIGHT CLICK]</strong> to decide how hard to push. Release to blast it!</span>
+        </div>
+        <div class="colossal-rule-item alert-rule">
+          <span class="rule-icon">⚠️</span>
+          <span><strong>Proximity Dilemma:</strong> If closer than 18m, weak pushes FAIL & <em>IT WILL PUSH YOU!</em></span>
+        </div>
+      </div>
+      <div class="colossal-mode-actions">
+        <button id="btn-colossal-lock" class="btn-colossal-btn">LOCK AIMED TARGET [F]</button>
+        <button id="btn-colossal-push" class="btn-colossal-btn btn-push-gradient">HOLD TO CHARGE PUSH [SPACE]</button>
+      </div>
+    </div>
+
+    <!-- Cybernetic 3D Aiming Crosshair -->
+    <div id="aim-crosshair-3d" class="aim-crosshair-3d hidden">
+      <div class="crosshair-bracket left">[</div>
+      <div class="crosshair-dot-ring"></div>
+      <div class="crosshair-bracket right">]</div>
+      <div class="crosshair-aim-label">AIM RETICLE [MOVE MOUSE]</div>
+    </div>
+
+    <!-- Cybernetic Kinetic Lock-On Target Telemetry HUD -->
+    <div id="kinetic-target-reticle" class="kinetic-target-reticle hidden">
+      <div class="reticle-box">
+        <div class="reticle-corner tl"></div>
+        <div class="reticle-corner tr"></div>
+        <div class="reticle-corner bl"></div>
+        <div class="reticle-corner br"></div>
+        <div class="reticle-rot-ring"></div>
+        <div class="reticle-center-marker"></div>
+      </div>
+      <div class="target-card">
+        <div class="target-card-header">
+          <span class="target-tag">TARGET LOCKED</span>
+          <span id="target-designation" class="target-id">COLOSSAL ASTEROID [THETA-9]</span>
+        </div>
+        <div class="target-metrics-grid">
+          <div class="t-metric"><span class="t-lbl">RANGE:</span> <span id="target-range" class="t-val highlight-cyan">48.5m</span></div>
+          <div class="t-metric"><span class="t-lbl">CLOSING:</span> <span id="target-speed" class="t-val">84.2 km/h</span></div>
+          <div class="t-metric"><span class="t-lbl">EST. TTI:</span> <span id="target-tti" class="t-val highlight-gold">2.1s</span></div>
+          <div class="t-metric"><span class="t-lbl">DIAMETER:</span> <span id="target-size" class="t-val">Ø 24.0m (48T)</span></div>
+        </div>
+        <div id="target-proximity-dilemma" class="target-dilemma-alert hidden">
+          <span class="dilemma-icon">⚠</span>
+          <span class="dilemma-text">CRITICAL PROXIMITY! DECIDE: PUSH OR IT PUSHES YOU!</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Kinetic Push Deflection Flash Banner -->
+    <div id="push-deflection-banner" class="strike-banner push-banner hidden">
+      <div class="strike-icon">⚡</div>
+      <div class="strike-text-group">
+        <div class="strike-title">KINETIC PUSH DEFLECTION!</div>
+        <div id="push-detail" class="strike-detail">Delivered +38.5 kN repulsion! Asteroid blasted away with reaction recoil.</div>
+      </div>
+    </div>
+
+    <!-- Asteroid Overpowered Push Banner ("it will push it") -->
+    <div id="asteroid-overpower-banner" class="strike-banner overpower-banner hidden">
+      <div class="strike-icon">💥</div>
+      <div class="strike-text-group">
+        <div class="strike-title" style="color: #ef4444;">ASTEROID OVERPOWERED PUSH — IT PUSHES YOU!</div>
+        <div id="overpower-detail" class="strike-detail">Too close & weak charge! Colossal inertia overpowered the push & slammed your suit backwards!</div>
+      </div>
     </div>
 
     <!-- External Mace Strike Flash Banner -->
@@ -414,98 +651,8 @@
       </div>
     </footer>
 
-    <!-- Side Tuning Drawer (Collapsible) -->
-    <aside class="tuning-drawer" id="tuning-drawer">
-      <button class="drawer-toggle" id="drawer-toggle" title="Toggle Live Physics Knobs">
-        <span>⚙ FEEL KNOBS</span>
-      </button>
-      <div class="drawer-content">
-        <h3>PHYSICS FEEL KNOBS</h3>
-        <p class="drawer-desc">Direct mirror of <code>FMaceOrbitTuning</code>, <code>FMomentumTransferTuning</code> & <code>FLaunchPushOffParameters</code>.</p>
-
-        <div class="slider-group">
-          <label>Launch Departure Speed: <span id="val-launch-speed">3000</span> cm/s (108 km/h)</label>
-          <input type="range" id="slider-launch-speed" min="1500" max="4500" value="3000" step="100">
-        </div>
-
-        <div class="slider-group">
-          <label>Tether Length (r): <span id="val-tether">180</span> cm</label>
-          <input type="range" id="slider-tether" min="80" max="300" value="180" step="5">
-        </div>
-
-        <div class="slider-group">
-          <label>Mace Mass (m_m): <span id="val-mace-mass">40</span> kg</label>
-          <input type="range" id="slider-mace-mass" min="5" max="120" value="40" step="1">
-        </div>
-
-        <div class="slider-group">
-          <label>Spin Acceleration: <span id="val-accel">1440</span> °/s²</label>
-          <input type="range" id="slider-accel" min="360" max="3600" value="1440" step="60">
-        </div>
-
-        <div class="slider-group">
-          <label>Max Angular Speed: <span id="val-max-speed">1080</span> °/s (3 rev/s)</label>
-          <input type="range" id="slider-max-speed" min="360" max="2160" value="1080" step="60">
-        </div>
-
-        <div class="slider-group">
-          <label>Impulse Efficiency (α): <span id="val-alpha">0.65</span></label>
-          <input type="range" id="slider-alpha" min="0.1" max="1.5" value="0.65" step="0.05">
-        </div>
-
-        <div class="slider-group">
-          <label>Lateral Damping (λ): <span id="val-damping">1.50</span> /s</label>
-          <input type="range" id="slider-damping" min="0.2" max="4.0" value="1.5" step="0.1">
-        </div>
-
-        <div class="drawer-section-divider">STEP 5: VISUALS & DYNAMIC AUDIO</div>
-
-        <div class="slider-group">
-          <label>Speed FOV Dilation: <span id="val-fov-dilation">25</span>° (Max 105°)</label>
-          <input type="range" id="slider-fov-dilation" min="5" max="40" value="25" step="1">
-        </div>
-
-        <div class="slider-group">
-          <label>Camera Dutch Roll Bank: <span id="val-dutch-roll">4.5</span>°</label>
-          <input type="range" id="slider-dutch-roll" min="0" max="10" value="4.5" step="0.5">
-        </div>
-
-        <div class="slider-group">
-          <label>Metasound Master Volume: <span id="val-audio-volume">100</span>%</label>
-          <input type="range" id="slider-audio-volume" min="0" max="100" value="100" step="5">
-        </div>
-
-        <div class="drawer-section-divider">STEP 7: ASSET PIPELINE & POLISH</div>
-
-        <div class="slider-group">
-          <label>Engine Hum Volume: <span id="val-engine-hum">45</span>%</label>
-          <input type="range" id="slider-engine-hum" min="0" max="100" value="45" step="5">
-        </div>
-
-        <div class="slider-group">
-          <label>Proximity Alarm Volume: <span id="val-prox-alarm-vol">75</span>%</label>
-          <input type="range" id="slider-prox-alarm-vol" min="0" max="100" value="75" step="5">
-        </div>
-
-        <div class="slider-group">
-          <label>Proximity Alarm Distance: <span id="val-prox-dist">25</span> m</label>
-          <input type="range" id="slider-prox-dist" min="15" max="45" value="25" step="1">
-        </div>
-
-        <div class="slider-group">
-          <label>Mace Plasma Heat Multiplier: <span id="val-plasma-heat">100</span>%</label>
-          <input type="range" id="slider-plasma-heat" min="50" max="250" value="100" step="10">
-        </div>
-
-        <div class="button-row">
-          <button id="btn-reset-feel" class="btn-secondary">RESET DEFAULTS</button>
-          <button id="btn-toggle-blind-math" class="btn-primary">BLIND MATH: ON</button>
-          <button id="btn-toggle-gizmos" class="btn-secondary">GIZMOS: OFF</button>
-        </div>
-      </div>
-    </aside>
   </div>
 
-  <script src="app.js?v=5.1"></script>
+  <script src="app.js?v=8.0"></script>
 </body>
 </html>
