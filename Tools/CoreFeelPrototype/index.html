@@ -51,6 +51,18 @@
           <div class="hud-label">KM/H</div>
         </div>
       </div>
+      <!-- Launch prompt (visible during LaunchPushOff) -->
+      <div id="launch-guidance-banner" class="launch-prompt">
+        <div class="launch-aim-row">
+          <span id="launch-key-a" class="launch-key">&#9664; A</span>
+          <span id="launch-aim-text" class="launch-heading">+0.0&deg;</span>
+          <span id="launch-key-d" class="launch-key">D &#9654;</span>
+        </div>
+        <button id="btn-charge-push" class="launch-hold"><span id="charge-btn-text">HOLD SPACE TO PUSH</span></button>
+      </div>
+
+      <!-- Key hints: launch phase + first runs only -->
+      <div id="hud-hints" class="hud-hints hud-label hidden">A / D spin &middot; release to kick &middot; ESC pause</div>
     </div>
 
     <!-- Dev Overlay: engineering telemetry + tuning drawer (toggle with ` or F3, or ?dev=1) -->
@@ -331,23 +343,6 @@
         </div>
       </div>
     </aside>
-    </div>
-
-    <!-- Centered Launch Guidance Banner (Visible during LaunchPushOff) -->
-    <div id="launch-guidance-banner" class="launch-guidance-banner">
-      <div class="launch-header-tag">CELESTIAL ORIGIN ANCHOR (X = 0)</div>
-      <h2 class="launch-title">HYDRAULIC RAM LAUNCH SEQUENCE</h2>
-      <div class="launch-aim-indicator">
-        <span class="aim-arrow-icon">➔</span>
-        <span id="launch-aim-text">DEPARTURE HEADING: 0.0° [CENTER CORRIDOR]</span>
-      </div>
-      <p class="launch-instructions">
-        Steer trajectory with <strong>[A / D]</strong> • Hold <strong>[SPACE]</strong> to compress kinetic ram • Release to plunge into gauntlet
-      </p>
-      <button id="btn-charge-push" class="btn-charge-push">
-        <span class="charge-btn-icon">⚡</span>
-        <span id="charge-btn-text">HOLD [SPACE] TO CHARGE PUSH</span>
-      </button>
     </div>
 
     <!-- Screen 2: Colossal Asteroid Belt & Kinetic Field Guidance Banner -->

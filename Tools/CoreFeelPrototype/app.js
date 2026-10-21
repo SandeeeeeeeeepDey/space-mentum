@@ -1058,8 +1058,14 @@
     State.TargetFOV = Math.min(106.0, 80.0 + finalCharge * 18.0);
     State.CameraTrauma = finalCharge * 0.45;
 
+    countHintRun();
     const banner = document.getElementById('launch-guidance-banner');
-    if (banner) banner.classList.add('hidden');
+    if (banner) {
+      banner.classList.add('fade-out');
+      setTimeout(() => {
+        if (State.RunPhase !== 'LaunchPushOff') banner.classList.add('hidden');
+      }, 300);
+    }
   }
 
   function restartRun() {
@@ -1079,6 +1085,7 @@
 
       const banner = document.getElementById('launch-guidance-banner');
       if (banner) banner.classList.add('hidden');
+      countHintRun();
       const colossalBanner = document.getElementById('colossal-mode-banner');
       if (colossalBanner) colossalBanner.classList.remove('hidden');
 
@@ -1140,7 +1147,7 @@
 
     // Show launch banner
     const banner = document.getElementById('launch-guidance-banner');
-    if (banner) banner.classList.remove('hidden');
+    if (banner) banner.classList.remove('hidden', 'fade-out');
 
     // Hide modals and banners
     const voidModal = document.getElementById('void-doom-modal');
@@ -3699,6 +3706,25 @@
   const HUD_ARC_CIRCUMFERENCE = 2 * Math.PI * 52; // matches r=52 in #game-hud SVG dial
   const HUD = { ready: false, markerKey: '', gateTicks: [], lastScore: 0, lastArcQ: -1, arcHot: false };
 
+  // First-runs key hint counter (localStorage, tolerant of blocked storage)
+  const HINT_MAX_RUNS = 3;
+  const HINT_STORAGE_KEY = 'SPACEMENTUM_HINT_RUNS_V1';
+
+  function readHintRuns() {
+    try {
+      return parseInt(localStorage.getItem(HINT_STORAGE_KEY), 10) || 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function countHintRun() {
+    HUD.hintRuns = readHintRuns() + 1;
+    try {
+      localStorage.setItem(HINT_STORAGE_KEY, String(HUD.hintRuns));
+    } catch (e) {}
+  }
+
   function cacheHudRefs() {
     HUD.progress = document.getElementById('hud-progress');
     HUD.progressFill = document.getElementById('hud-progress-fill');
@@ -3710,6 +3736,13 @@
     HUD.speedVal = document.getElementById('hud-speed-val');
     HUD.powerArc = document.getElementById('hud-power-arc');
     HUD.radarCanvas = document.getElementById('radar-canvas');
+    HUD.launchHeading = document.getElementById('launch-aim-text');
+    HUD.launchKeyA = document.getElementById('launch-key-a');
+    HUD.launchKeyD = document.getElementById('launch-key-d');
+    HUD.launchHold = document.getElementById('btn-charge-push');
+    HUD.launchHoldText = document.getElementById('charge-btn-text');
+    HUD.hints = document.getElementById('hud-hints');
+    HUD.hintRuns = readHintRuns();
     HUD.ready = true;
   }
 
@@ -3804,6 +3837,28 @@
       State.CoMVelocity.z + State.LateralVelocity.z
     );
     setHudText(HUD.speedVal, String(Math.round(speedCms * 0.036)));
+
+    // Launch prompt (corridor LaunchPushOff only; hidden/faded by fireLaunchPush / restartRun)
+    if (isCorridor && State.RunPhase === 'LaunchPushOff') {
+      const a = State.LaunchAimAngleDeg;
+      setHudText(HUD.launchHeading, `${a >= 0 ? '+' : ''}${a.toFixed(1)}\u00B0`);
+      HUD.launchKeyA.classList.toggle('active', Input.isAPressed);
+      HUD.launchKeyD.classList.toggle('active', Input.isDPressed);
+      HUD.launchHold.classList.toggle('charging', State.bIsChargingPush);
+      setHudText(HUD.launchHoldText, State.bIsChargingPush ? 'RELEASE TO LAUNCH' : 'HOLD SPACE TO PUSH');
+    }
+
+    // Key hints: launch phase, plus first 8s of flight on the first 3 runs
+    let hintText = '';
+    if (isCorridor && State.RunPhase === 'LaunchPushOff') {
+      hintText = 'A / D spin \u00B7 release to kick \u00B7 ESC pause';
+    } else if (State.RunPhase === 'Running' && HUD.hintRuns <= HINT_MAX_RUNS && State.ActiveFlightTimeSeconds < 8.0) {
+      hintText = isCorridor
+        ? 'A / D spin \u00B7 release to kick \u00B7 ESC pause'
+        : 'CLICK/F lock \u00B7 hold SPACE push \u00B7 ESC pause';
+    }
+    setHudText(HUD.hints, hintText);
+    HUD.hints.classList.toggle('hidden', hintText === '');
 
     // Power arc: launch charge / push charge (Colossal) / spin energy in flight
     let powerRatio;
@@ -3985,13 +4040,6 @@
         powerBarFillEl.style.width = `${ekPct}%`;
       }
       if (powerDescEl) powerDescEl.textContent = `Tangential strike ready: 40kg mace @ ${Math.round(tanSpeed * 100)} cm/s`;
-    }
-
-    // --- Launch Guidance Banner Updates ---
-    const aimTextEl = document.getElementById('launch-aim-text');
-    if (aimTextEl && State.RunPhase === 'LaunchPushOff') {
-      const dirText = State.LaunchAimAngleDeg < -1.5 ? 'LEFT CORRIDOR' : State.LaunchAimAngleDeg > 1.5 ? 'RIGHT CORRIDOR' : 'CENTER CORRIDOR';
-      aimTextEl.textContent = `DEPARTURE HEADING: ${State.LaunchAimAngleDeg >= 0 ? '+' : ''}${State.LaunchAimAngleDeg.toFixed(1)}° [${dirText}]`;
     }
 
     // Step 8: Kinetic Target & Push Force Card Updates
