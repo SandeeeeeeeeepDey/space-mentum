@@ -58,6 +58,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "SpaceMentum|Drift")
 	float GetForwardSpeedCmPerSec() const { return DriftTuning.ForwardSpeedCmPerSec; }
 
+	/** Sets the forward drift speed (cm/s). */
+	UFUNCTION(BlueprintCallable, Category = "SpaceMentum|Drift")
+	void SetForwardSpeed(float InForwardSpeedCmPerSec) { DriftTuning.ForwardSpeedCmPerSec = InForwardSpeedCmPerSec; }
+
 protected:
 	/** Feel knob for the relentless forward speed. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Drift")

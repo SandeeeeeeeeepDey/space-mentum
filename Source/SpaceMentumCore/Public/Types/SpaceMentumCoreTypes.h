@@ -131,6 +131,34 @@ struct SPACEMENTUMCORE_API FFlightTelemetryData
 	/** Proximate navigational contacts within the 120m cockpit sphere. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Telemetry")
 	TArray<FTacticalRadarContact> RadarContacts;
+
+	/** Whether a colossal asteroid is currently targeted and locked. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Telemetry")
+	bool bKineticLockActive = false;
+
+	/** Distance to currently locked target (meters). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Telemetry")
+	float LockedTargetDistanceMeters = 0.0f;
+
+	/** Relative closing speed of locked target (km/h). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Telemetry")
+	float LockedTargetRelativeSpeedKmh = 0.0f;
+
+	/** Time-to-impact (TTI) for locked target in seconds (-1 if diverging). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Telemetry")
+	float LockedTargetTimeToImpactSec = -1.0f;
+
+	/** Whether locked target has breached critical proximity (< 18m). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Telemetry")
+	bool bLockedTargetCriticalProximity = false;
+
+	/** Active kinetic push capacitor charge ratio [0.0, 1.0]. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Telemetry")
+	float KineticPushChargeRatio = 0.0f;
+
+	/** Kinetic push force rating in kiloNewtons (kN). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Telemetry")
+	float KineticPushForceKiloNewtons = 0.0f;
 };
 
 /** Tunings for the Starting Asteroid Push-Off launch phase. */

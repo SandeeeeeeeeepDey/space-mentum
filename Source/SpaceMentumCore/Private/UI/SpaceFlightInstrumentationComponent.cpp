@@ -13,6 +13,7 @@
 #include "Components/MomentumTransferComponent.h"
 #include "Components/MaceOrbitComponent.h"
 #include "Audio/SpaceProceduralFlightAudioComponent.h"
+#include "Components/SpaceKineticManipulatorComponent.h"
 #include "Kismet/GameplayStatics.h"
 
 USpaceFlightInstrumentationComponent::USpaceFlightInstrumentationComponent()
@@ -95,6 +96,31 @@ void USpaceFlightInstrumentationComponent::TickComponent(
 			const float TangentialSpeedMPerSec = FMath::Abs(OmegaRad) * TetherMeters;
 			CurrentTelemetry.RotationalKineticEnergyJoules = 0.5f * MaceMassKg * FMath::Square(TangentialSpeedMPerSec);
 		}
+	}
+
+	// 1.5. Query Kinetic Manipulator Telemetry (Target Lock, Range, TTI, Push Charge)
+	USpaceKineticManipulatorComponent* ManipulatorComp = OwningCharacter->GetKineticManipulator();
+	if (ManipulatorComp)
+	{
+		const ETargetLockStatus LockStatus = ManipulatorComp->GetLockStatus();
+		CurrentTelemetry.bKineticLockActive = (LockStatus == ETargetLockStatus::TargetLocked || LockStatus == ETargetLockStatus::CriticalProximity);
+		const FKineticTargetLockInfo& LockInfo = ManipulatorComp->GetLockInfo();
+		CurrentTelemetry.LockedTargetDistanceMeters = LockInfo.SurfaceDistanceCm * 0.01f;
+		CurrentTelemetry.LockedTargetRelativeSpeedKmh = LockInfo.RelativeVelocity.Size() * 0.036f;
+		CurrentTelemetry.LockedTargetTimeToImpactSec = LockInfo.TimeToImpactSeconds;
+		CurrentTelemetry.bLockedTargetCriticalProximity = LockInfo.bInCriticalZone;
+		CurrentTelemetry.KineticPushChargeRatio = ManipulatorComp->GetPushChargeRatio();
+		CurrentTelemetry.KineticPushForceKiloNewtons = (ManipulatorComp->GetPushChargeRatio() * 50000.0f) * 0.001f;
+	}
+	else
+	{
+		CurrentTelemetry.bKineticLockActive = false;
+		CurrentTelemetry.LockedTargetDistanceMeters = 0.0f;
+		CurrentTelemetry.LockedTargetRelativeSpeedKmh = 0.0f;
+		CurrentTelemetry.LockedTargetTimeToImpactSec = -1.0f;
+		CurrentTelemetry.bLockedTargetCriticalProximity = false;
+		CurrentTelemetry.KineticPushChargeRatio = 0.0f;
+		CurrentTelemetry.KineticPushForceKiloNewtons = 0.0f;
 	}
 
 	// 2. Refresh Tactical Radar Contacts at 20 Hz

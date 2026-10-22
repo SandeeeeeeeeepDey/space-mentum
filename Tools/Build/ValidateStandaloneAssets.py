@@ -125,6 +125,22 @@ def validate_source_modules(suite):
     palette_header = os.path.join(source_dir, "SpaceMentumCore", "Public", "Data", "SpaceMaterialPaletteDataAsset.h")
     suite.assert_test(os.path.isfile(palette_header), "SpaceMaterialPaletteDataAsset.h exists")
 
+    # Colossal Asteroid Belt, Kinetic Push & Proximity Dilemma
+    kinetic_types = os.path.join(source_dir, "SpaceMentumPhysics", "Public", "Types", "SpaceMentumKineticManipulationTypes.h")
+    suite.assert_test(os.path.isfile(kinetic_types), "SpaceMentumKineticManipulationTypes.h exists")
+
+    kinetic_solver = os.path.join(source_dir, "SpaceMentumPhysics", "Public", "Solvers", "KineticPushSolver.h")
+    suite.assert_test(os.path.isfile(kinetic_solver), "KineticPushSolver.h exists")
+
+    colossal_ast = os.path.join(source_dir, "SpaceMentumCore", "Public", "Environment", "SpaceColossalAsteroidActor.h")
+    suite.assert_test(os.path.isfile(colossal_ast), "SpaceColossalAsteroidActor.h exists")
+
+    colossal_belt = os.path.join(source_dir, "SpaceMentumCore", "Public", "Environment", "SpaceColossalAsteroidBeltActor.h")
+    suite.assert_test(os.path.isfile(colossal_belt), "SpaceColossalAsteroidBeltActor.h exists")
+
+    manipulator = os.path.join(source_dir, "SpaceMentumCore", "Public", "Components", "SpaceKineticManipulatorComponent.h")
+    suite.assert_test(os.path.isfile(manipulator), "SpaceKineticManipulatorComponent.h exists")
+
 def validate_editor_scripts_and_tools(suite):
     print("\n--- [4] Validating Tools, Editor Scripts & Standalone Packaging Pipeline ---")
     tools_editor = os.path.join(PROJECT_ROOT, "Tools", "Editor")

@@ -28,6 +28,7 @@
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Components/SpaceKineticManipulatorComponent.h"
 
 namespace SpaceAstronautDefaults
 {
@@ -91,6 +92,7 @@ ASpaceAstronautCharacter::ASpaceAstronautCharacter()
 	FlightCamera = CreateDefaultSubobject<USpaceFlightCameraComponent>(TEXT("FlightCamera"));
 	FlightVFX = CreateDefaultSubobject<USpaceFlightVFXComponent>(TEXT("FlightVFX"));
 	FlightAudio = CreateDefaultSubobject<USpaceProceduralFlightAudioComponent>(TEXT("FlightAudio"));
+	KineticManipulator = CreateDefaultSubobject<USpaceKineticManipulatorComponent>(TEXT("KineticManipulator"));
 
 	// --- Step 7 Mechanical Arm Rigging, Mace Head & Physics Constraints ---
 	MechanicalArmMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MechanicalArmMesh"));

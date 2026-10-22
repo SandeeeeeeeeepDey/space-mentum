@@ -42,6 +42,7 @@ class UPhysicsConstraintComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UStaticMeshComponent;
+class USpaceKineticManipulatorComponent;
 
 UCLASS()
 class SPACEMENTUMCORE_API ASpaceAstronautCharacter : public ACharacter
@@ -98,6 +99,7 @@ public:
 	UMaterialInstanceDynamic* GetSuitDynamicMaterial() const { return SuitDynamicMaterial; }
 	UMaterialInstanceDynamic* GetArmDynamicMaterial() const { return ArmDynamicMaterial; }
 	UMaterialInstanceDynamic* GetMaceDynamicMaterial() const { return MaceDynamicMaterial; }
+	USpaceKineticManipulatorComponent* GetKineticManipulator() const { return KineticManipulator; }
 
 	// --- Debug & Telemetry (Enforcing Rule 4 Blind Math) ---
 
@@ -153,6 +155,10 @@ protected:
 	/** Dynamic procedural audio & Metasound coordinator driving spin frequency and launch transients. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Audio")
 	TObjectPtr<USpaceProceduralFlightAudioComponent> FlightAudio;
+
+	/** Kinetic aiming, locking, and push manipulation component for colossal asteroids. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SpaceMentum|Kinetic")
+	TObjectPtr<USpaceKineticManipulatorComponent> KineticManipulator;
 
 	// --- Visual & Particle Pipeline (Step 5 Niagara) ----------------------------
 
