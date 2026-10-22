@@ -134,6 +134,16 @@ The game features two distinct and absolute failure states:
    * **Check:** The engine looks ahead 13 to 40 seconds.
    * **Execution:** If there are zero objects within the mace's maximum reach within that time window (meaning the player has absolutely no way to alter their speed or trajectory), the game must instantly trigger a dramatic "Lost to the Void" failure state. Do not let the player drift aimlessly; kill the run immediately to preserve pacing.
 
+#### Crash Debrief (after a Kinetic Impact)
+
+> **Creator's request:** *"when i lose, by getting hit, it should show me what menuvering i could have done if any to have avoidd the asteroid … or obstecle"*
+
+A crash teaches instead of only punishing. When the run ends in a Kinetic Impact, the crash card shows one plain sentence under **COULD YOU HAVE MADE IT?** saying whether a way out existed, what it was (push off the rock you hit, push off another one, push harder/softer or not at all, or launch differently) and when, or, if the search really found nothing, that there was no escape and the line was set earlier. **▶ WATCH (W)** plays a ghost replay: a red ghost for what the player did and a cyan ghost for what would have worked, with a short action label (`PUSH 60%`, `LAUNCH +12°`). Can be switched off in Settings (`Crash tips`).
+
+* **Same physics, not a lookalike:** the analysis rewinds a 6 s history and re-runs the **real** physics tick silently (fixed 120 Hz step, seeded RNG, sim clock) with one different move, so the answer can be trusted.
+* **Only after the run has ended:** nothing is computed or shown during flight, so Rule 4 ("Blind Math", no in-play prediction) still holds in full. The debrief is the *post-mortem*, not a crutch.
+* Void, missed-portal and too-slow results are out of scope for the debrief.
+
 ### Rule 4: UI & Flight Instrumentation ("Blind Math" vs. Telemetry)
 
 To balance hard-core Newtonian intuition with situational awareness, the interface strictly delineates **Telemetry Instruments** from **Predictive Assistance**:

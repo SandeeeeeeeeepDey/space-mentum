@@ -257,6 +257,10 @@
     StrikeCount: 0,
     LastStrikeTime: 0,
 
+    // Replayable sim: gameplay clock (ms, advanced only by physicsTick) + seeded RNG for physics/spawns
+    SimTimeMs: 0,
+    RngSeed: 1,
+
     // Doom Lookahead Diagnosis
     DoomSnapshot: {
       bIsDoomImminent: false,
@@ -299,9 +303,30 @@
     isAPressed: false,
     isDPressed: false,
     isSpacePressed: false,
-    lastAPressTime: 0,
+    lastAPressTime: 0, // SOCD ordering: monotonically increasing press sequence numbers
     lastDPressTime: 0,
+    seq: 0,
   };
+
+  // Player-facing options (persisted with the other settings)
+  const Settings = { crashTips: true };
+
+  // --- Replayable Sim: silent re-runs of the real physics (crash analysis, §2 of PLAN_CrashEscapeHint) ---
+  // While Sim.silent is true nothing may touch audio, DOM or scene objects; end-of-run triggers
+  // only record Sim.outcome.
+  const Sim = { silent: false, outcome: null, saved: null, override: null, ignoreVoid: false, voidSeen: false };
+
+  const SIM_DT = 1 / 120;          // fixed physics step (real game and silent re-runs alike)
+  const HIST_SAMPLE_STEPS = 4;     // one history snapshot per 1/30 s
+  const HIST_WINDOW_MS = 6000;
+
+  // mulberry32 over State.RngSeed: used for everything that changes physics or spawns
+  function simRandom() {
+    let t = (State.RngSeed = (State.RngSeed + 0x6D2B79F5) >>> 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
 
   // --- Game Flow / UI State (separate from State.RunPhase physics phases) ---
   const UI = {
@@ -326,6 +351,7 @@
   let lastProximityPingTime = 0;
 
   function getAudioContext() {
+    if (Sim.silent) return null;
     if (!audioCtx) {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       if (AudioContextClass) {
@@ -389,7 +415,7 @@
   }
 
   function updateContinuousSpinAudio(angularSpeedRadPerSec) {
-    if (!audioCtx || !continuousSpinOsc || !continuousSpinGain) return;
+    if (Sim.silent || !audioCtx || !continuousSpinOsc || !continuousSpinGain) return;
     const revPerSec = Math.abs(angularSpeedRadPerSec) / (2 * Math.PI);
     if (revPerSec > 0.1 && State.RunPhase === 'Running') {
       const targetFreq = Math.min(650, 75 + revPerSec * 160);
@@ -402,7 +428,7 @@
   }
 
   function updateContinuousEngineHumAudio(forwardSpeedCmPerSec, lateralSpeedCmPerSec) {
-    if (!audioCtx || !continuousReactorHumOsc || !continuousReactorHumGain) return;
+    if (Sim.silent || !audioCtx || !continuousReactorHumOsc || !continuousReactorHumGain) return;
     if (State.RunPhase === 'Running') {
       const speedRatio = Math.min(1.5, Math.hypot(forwardSpeedCmPerSec, lateralSpeedCmPerSec) / 3000.0);
       const targetFreq = 50 + speedRatio * 25.0;
@@ -448,7 +474,7 @@
       State.ProximityAlarm.nearestPos = nearestPos || null;
 
       const pingInterval = 1.0 - (threatRatio * 0.92);
-      if (nowSeconds - lastProximityPingTime >= pingInterval) {
+      if (!Sim.silent && nowSeconds - lastProximityPingTime >= pingInterval) {
         lastProximityPingTime = nowSeconds;
         playProximityRadarPing(threatRatio);
       }
@@ -828,6 +854,29 @@
     });
   }
 
+  // --- Input events: the DOM handlers and the silent replays both go through here ---
+  function applyInputEvent(name) {
+    if (!Sim.silent && Hist.active) Hist.events.push({ t: State.SimTimeMs, type: 'input', name });
+    switch (name) {
+      case 'aDown': Input.isAPressed = true; Input.lastAPressTime = ++Input.seq; evaluateActiveSpin(); break;
+      case 'dDown': Input.isDPressed = true; Input.lastDPressTime = ++Input.seq; evaluateActiveSpin(); break;
+      case 'aUp': Input.isAPressed = false; evaluateActiveSpin(); break;
+      case 'dUp': Input.isDPressed = false; evaluateActiveSpin(); break;
+      case 'spaceDown':
+        Input.isSpacePressed = true;
+        if (State.RunPhase === 'LaunchPushOff') startChargingPush();
+        else if (State.RunPhase === 'Running') startPushCharge();
+        break;
+      case 'spaceUp':
+        Input.isSpacePressed = false;
+        if (State.RunPhase === 'LaunchPushOff') fireLaunchPush(); else releasePush();
+        break;
+      case 'launchDown': startChargingPush(); break;
+      case 'launchUp': fireLaunchPush(); break;
+      case 'clear': clearHeldInput(); break;
+    }
+  }
+
   // --- SOCD Input Handling ---
   function evaluateActiveSpin() {
     if (State.RunPhase !== 'Running') return;
@@ -885,11 +934,13 @@
     State.CoMPosition.z += normal.z * pushDist;
 
     State.StrikeCount++;
-    State.LastStrikeTime = performance.now();
+    State.LastStrikeTime = State.SimTimeMs;
 
-    playStrikeSound();
-    triggerStrikeFlash(obstacle, deltaV, u);
-    spawnKineticSparks(hitWorldPos, 35);
+    if (!Sim.silent) {
+      playStrikeSound();
+      triggerStrikeFlash(obstacle, deltaV, u);
+      spawnKineticSparks(hitWorldPos, 35);
+    }
 
     State.TargetFOV = Math.min(106.0, State.CurrentFOV + 14.0);
     State.CameraTrauma = Math.min(1.0, State.CameraTrauma + 0.45);
@@ -899,6 +950,7 @@
   const TOAST_MAX_VISIBLE = 3;
 
   function showToast(text, variant) {
+    if (Sim.silent) return;
     const layer = document.getElementById('toast-layer');
     if (!layer) return;
     while (layer.children.length >= TOAST_MAX_VISIBLE) layer.removeChild(layer.firstChild);
@@ -916,6 +968,7 @@
   }
 
   function triggerStrikeFlash() {
+    if (Sim.silent) return;
     showToast('STRIKE', 'gold');
 
     const container = document.getElementById('canvas-container');
@@ -928,7 +981,16 @@
   // --- Rule 3 Fail State Triggers ---
   function triggerVoidDoom(snapshot) {
     if (State.RunPhase !== 'Running') return;
+    if (Sim.silent && Sim.ignoreVoid) {
+      // Crash analysis keeps flying a doomed line so it can still tell whether the rock was avoided
+      Sim.voidSeen = true;
+      return;
+    }
     State.RunPhase = 'LostToTheVoid';
+    if (Sim.silent) {
+      Sim.outcome = { type: 'void', simTimeMs: State.SimTimeMs, obstacle: null };
+      return;
+    }
 
     playVoidDoomSound();
 
@@ -939,9 +1001,27 @@
   function triggerKineticCrash(obstacle, impactSpeed) {
     if (State.RunPhase !== 'Running') return;
     State.RunPhase = 'CrashedKineticImpact';
+    const crashPos = { x: State.CoMPosition.x, y: State.CoMPosition.y, z: State.CoMPosition.z };
+    if (Sim.silent) {
+      Sim.outcome = { type: 'crash', simTimeMs: State.SimTimeMs, obstacle: obstacle || null, pos: crashPos };
+      return;
+    }
+    Hist.crash = {
+      simTimeMs: State.SimTimeMs,
+      pos: crashPos,
+      body: {
+        x: State.CoMPosition.x,
+        y: State.CoMPosition.y + State.InternalDisplacement.y,
+        z: State.CoMPosition.z + State.InternalDisplacement.z,
+      },
+      obstacleUid: (obstacle && obstacle.uid) || null,
+      obstacleName: (obstacle && obstacle.name) || null,
+      speed: impactSpeed,
+    };
 
     playCrashSound();
     State.CameraTrauma = 1.0;
+    startCrashAnalysis();
 
     const speedEl = document.getElementById('crash-speed-val');
     if (speedEl) speedEl.textContent = `${Math.round(impactSpeed * 0.036)} km/h`;
@@ -955,15 +1035,20 @@
   function startChargingPush() {
     if (State.RunPhase !== 'LaunchPushOff') return;
     State.bIsChargingPush = true;
-    const btn = document.getElementById('btn-charge-push');
+    const btn = Sim.silent ? null : document.getElementById('btn-charge-push');
     if (btn) btn.classList.add('charging');
   }
 
   function fireLaunchPush() {
     if (State.RunPhase !== 'LaunchPushOff' || !State.bIsChargingPush) return;
+    if (!Sim.silent) {
+      // Pre-launch state (aim + charge in hand) so the crash analysis can retry other launches
+      Hist.prelaunch = takeSnapshot();
+      Hist.prelaunch.launch = { aim: State.LaunchAimAngleDeg, charge: Math.max(0.18, State.LaunchPushCharge) };
+    }
     State.bIsChargingPush = false;
 
-    const btn = document.getElementById('btn-charge-push');
+    const btn = Sim.silent ? null : document.getElementById('btn-charge-push');
     if (btn) btn.classList.remove('charging');
 
     const finalCharge = Math.max(0.18, State.LaunchPushCharge);
@@ -980,14 +1065,22 @@
 
     State.RunPhase = 'Running';
 
+    // Punch camera FOV & trauma
+    State.TargetFOV = Math.min(106.0, 80.0 + finalCharge * 18.0);
+    State.CameraTrauma = finalCharge * 0.45;
+
+    if (Sim.silent) return;
+
     // Audio & Screen Effects
     playLaunchExplosionThump();
     triggerKickFlash();
     spawnKineticSparks(new THREE.Vector3(0, 0, 0), 45);
 
-    // Punch camera FOV & trauma
-    State.TargetFOV = Math.min(106.0, 80.0 + finalCharge * 18.0);
-    State.CameraTrauma = finalCharge * 0.45;
+    // History starts at launch: the whole flight is the analysis window
+    Hist.events.length = 0;
+    Hist.samples.length = 0;
+    Hist.launch = { simTimeMs: State.SimTimeMs, aim: State.LaunchAimAngleDeg, charge: finalCharge };
+    recordHistorySample();
 
     countHintRun();
     const banner = document.getElementById('launch-guidance-banner');
@@ -1001,6 +1094,20 @@
 
   function restartRun() {
     showScreen('playing');
+    State.RngSeed = (Math.random() * 4294967296) >>> 0;
+    State.SimTimeMs = 0.0;
+    State.LastStrikeTime = 0.0;
+    doomCheckAccumulator = 0;
+    colossalSpawnTimer = 0;
+    simAccumulator = 0;
+    Input.seq = 0; Input.lastAPressTime = 0; Input.lastDPressTime = 0;
+    stopCrashReplay();
+    resetHistory();
+    Analysis.token++;
+    Analysis.status = 'idle';
+    Analysis.result = null;
+    Analysis.replayData = null;
+    refreshWatchButton();
     if (Tuning.ActiveScreenMode === 'ColossalBelt') {
       State.RunPhase = 'Running';
       State.CoMPosition.x = 0.0; State.CoMPosition.y = 0.0; State.CoMPosition.z = 0.0;
@@ -1041,6 +1148,8 @@
         spawnIncomingColossalAsteroid(4500 + i * 2800);
       }
 
+      Hist.launch = { simTimeMs: 0, aim: 0, charge: 0 };
+      recordHistorySample();
       updateHUD();
       return;
     }
@@ -1119,11 +1228,980 @@
     updateHUD();
   }
 
+  // --- Replayable Sim: history ring buffer, snapshots, silent re-runs (PLAN_CrashEscapeHint §2) ---
+  const Hist = {
+    active: false,
+    samples: [],     // { t, snap, body, inputs } every 1/30 s of sim time, last HIST_WINDOW_MS
+    events: [],      // input events (replayable) + pushRelease markers, stamped with sim time
+    prelaunch: null, // snapshot just before the launch push fired (carries .launch {aim, charge})
+    launch: null,    // { simTimeMs, aim, charge }
+    crash: null,     // { simTimeMs, pos, obstacleUid, obstacleName, speed } of the run that just ended
+    sinceSample: 0,
+  };
+
+  function resetHistory() {
+    Hist.active = true;
+    Hist.samples.length = 0;
+    Hist.events.length = 0;
+    Hist.prelaunch = null;
+    Hist.launch = null;
+    Hist.crash = null;
+    Hist.sinceSample = 0;
+  }
+
+  // State fields physicsTick reads or writes (scalars); vectors and references are handled below
+  const SNAP_KEYS = [
+    'RunPhase', 'LaunchAimAngleDeg', 'LaunchPushCharge', 'bIsChargingPush',
+    'OrbitAngleRad', 'AngularVelocityRadPerSec', 'HeldSpinDirection', 'CounterRotationRad',
+    'StrikeCount', 'LastStrikeTime', 'SimTimeMs', 'RngSeed',
+    'ActiveFlightTimeSeconds', 'CleanGatesCleared', 'CleanEvasionStreak', 'GrazePenalties',
+    'PeakSpeedCmPerSec', 'SpeedSampleSum', 'SpeedSampleCount', 'CurrentCompositeScore',
+    'KineticPushCharge', 'bIsChargingKineticPush',
+    'CurrentFOV', 'TargetFOV', 'CameraTrauma',
+  ];
+
+  function findObstacleByUid(uid) {
+    if (!uid) return null;
+    for (const o of denseObstacles) if (o.uid === uid) return o;
+    for (const o of colossalIncomingAsteroids) if (o.uid === uid) return o;
+    return null;
+  }
+
+  // Collider-only stand-in for a Colossal rock (no geometry, no scene node)
+  function makeSimAsteroid(d) {
+    return {
+      uid: d.uid,
+      mesh: { position: new THREE.Vector3(d.px, d.py, d.pz), rotation: { x: 0, y: 0, z: 0 }, geometry: null, material: null },
+      radius: d.radius,
+      massKg: d.massKg,
+      velocity: new THREE.Vector3(d.vx, d.vy, d.vz),
+      rotSpeed: new THREE.Vector3(0, 0, 0),
+      name: d.name,
+      destroyed: d.destroyed,
+      rangeCm: 99999.0,
+      closingSpeedCms: 0.0,
+      ttiSeconds: 99.9,
+      bIsCritical: false,
+    };
+  }
+
+  // Deep copy of everything the sim steps read or write. Rocks are referenced by uid, never by identity.
+  function takeSnapshot() {
+    const s = { st: {} };
+    for (const k of SNAP_KEYS) s.st[k] = State[k];
+    s.com = { x: State.CoMPosition.x, y: State.CoMPosition.y, z: State.CoMPosition.z };
+    s.vel = { x: State.CoMVelocity.x, y: State.CoMVelocity.y, z: State.CoMVelocity.z };
+    s.disp = { y: State.InternalDisplacement.y, z: State.InternalDisplacement.z };
+    s.milestones = Object.assign({}, State.MilestonesPassed);
+    s.doom = Object.assign({}, State.DoomSnapshot);
+    s.prox = Object.assign({}, State.ProximityAlarm);
+    s.anchorUid = State.PushAnchor ? (State.PushAnchor.uid || null) : null;
+    s.pushBuffer = State.PushBuffer ? { until: State.PushBuffer.until, charge: State.PushBuffer.charge } : null;
+    s.maceSnap = State.MaceSnap ? { targetRad: State.MaceSnap.targetRad, remaining: State.MaceSnap.remaining } : null;
+    s.input = {
+      a: Input.isAPressed, d: Input.isDPressed, space: Input.isSpacePressed,
+      lastA: Input.lastAPressTime, lastD: Input.lastDPressTime, seq: Input.seq,
+    };
+    s.gates = SlalomTargets.map(t => (t.evaluated ? 1 : 0) | (t.cleared ? 2 : 0));
+    s.globals = { doomAcc: doomCheckAccumulator, spawnTimer: colossalSpawnTimer, seq: colossalAsteroidSeq };
+    s.ast = colossalIncomingAsteroids.map(a => ({
+      uid: a.uid, radius: a.radius, massKg: a.massKg, name: a.name, destroyed: a.destroyed,
+      px: a.mesh.position.x, py: a.mesh.position.y, pz: a.mesh.position.z,
+      vx: a.velocity.x, vy: a.velocity.y, vz: a.velocity.z,
+    }));
+    return s;
+  }
+
+  // keepAsteroids: leave colossalIncomingAsteroids alone (used when handing the live world back)
+  function restoreSnapshot(s, keepAsteroids) {
+    for (const k of SNAP_KEYS) State[k] = s.st[k];
+    State.CoMPosition.x = s.com.x; State.CoMPosition.y = s.com.y; State.CoMPosition.z = s.com.z;
+    State.CoMVelocity.x = s.vel.x; State.CoMVelocity.y = s.vel.y; State.CoMVelocity.z = s.vel.z;
+    State.InternalDisplacement.y = s.disp.y; State.InternalDisplacement.z = s.disp.z;
+    State.MilestonesPassed = Object.assign({}, s.milestones);
+    Object.assign(State.DoomSnapshot, s.doom);
+    Object.assign(State.ProximityAlarm, s.prox);
+    State.PushBuffer = s.pushBuffer ? { until: s.pushBuffer.until, charge: s.pushBuffer.charge } : null;
+    State.MaceSnap = s.maceSnap ? { targetRad: s.maceSnap.targetRad, remaining: s.maceSnap.remaining } : null;
+    Input.isAPressed = s.input.a; Input.isDPressed = s.input.d; Input.isSpacePressed = s.input.space;
+    Input.lastAPressTime = s.input.lastA; Input.lastDPressTime = s.input.lastD; Input.seq = s.input.seq;
+    for (let i = 0; i < SlalomTargets.length && i < s.gates.length; i++) {
+      SlalomTargets[i].evaluated = !!(s.gates[i] & 1);
+      SlalomTargets[i].cleared = !!(s.gates[i] & 2);
+    }
+    doomCheckAccumulator = s.globals.doomAcc;
+    colossalSpawnTimer = s.globals.spawnTimer;
+    colossalAsteroidSeq = s.globals.seq;
+    if (!keepAsteroids) colossalIncomingAsteroids = s.ast.map(makeSimAsteroid);
+    State.PushAnchor = findObstacleByUid(s.anchorUid);
+  }
+
+  function recordHistorySample() {
+    Hist.samples.push({
+      t: State.SimTimeMs,
+      snap: takeSnapshot(),
+      body: {
+        x: State.CoMPosition.x,
+        y: State.CoMPosition.y + State.InternalDisplacement.y,
+        z: State.CoMPosition.z + State.InternalDisplacement.z,
+      },
+      inputs: { spin: State.HeldSpinDirection, space: Input.isSpacePressed, charge: State.KineticPushCharge },
+    });
+    Hist.sinceSample = 0;
+    const cutoff = State.SimTimeMs - HIST_WINDOW_MS;
+    let drop = 0;
+    while (drop < Hist.samples.length - 1 && Hist.samples[drop].t < cutoff) drop++;
+    if (drop > 0) Hist.samples.splice(0, drop);
+    const t0 = Hist.samples[0].t;
+    let ev = 0;
+    while (ev < Hist.events.length && Hist.events[ev].t < t0) ev++;
+    if (ev > 0) Hist.events.splice(0, ev);
+  }
+
+  function histAfterStep() {
+    if (State.RunPhase !== 'Running') return;
+    if (++Hist.sinceSample >= HIST_SAMPLE_STEPS) recordHistorySample();
+  }
+
+  // Silent mode brackets: the live world (State, rocks, accumulators) is saved on entry and handed back on exit.
+  function enterSilent() {
+    if (Sim.silent) return;
+    Sim.saved = { snap: takeSnapshot(), realAsteroids: colossalIncomingAsteroids };
+    Sim.silent = true;
+    Sim.outcome = null;
+    Sim.override = null;
+  }
+
+  function exitSilent() {
+    if (!Sim.silent) return;
+    Sim.silent = false;
+    colossalIncomingAsteroids = Sim.saved.realAsteroids;
+    restoreSnapshot(Sim.saved.snap, true);
+    Sim.saved = null;
+    Sim.outcome = null;
+    Sim.override = null;
+    Sim.ignoreVoid = false;
+    Sim.voidSeen = false;
+  }
+
+  function withSilent(fn) {
+    enterSilent();
+    try {
+      return fn();
+    } finally {
+      exitSilent();
+    }
+  }
+
+  // "Do nothing from here": let go of everything the player could be holding. Unlike clearHeldInput this keeps the
+  // push that just fired (arm reach, anchor) intact, so the consequences of that push play out.
+  function releaseHeldControls() {
+    Input.isAPressed = false;
+    Input.isDPressed = false;
+    Input.isSpacePressed = false;
+    State.HeldSpinDirection = 'None';
+    State.bIsChargingPush = false;
+    State.bIsChargingKineticPush = false;
+    State.LaunchPushCharge = 0.0;
+    State.KineticPushCharge = 0.0;
+  }
+
+  // Step the real sim from the current (restored) state to untilMs, replaying recorded input events
+  // (sorted by time) as they come due. After a Sim.override fires, recorded inputs stop and everything is released.
+  // onStep runs after each step; returning true ends the run.
+  function simAdvance(untilMs, events, onStep) {
+    let ei = 0;
+    let cut = false;
+    if (events) while (ei < events.length && events[ei].t < State.SimTimeMs) ei++;
+    while (State.SimTimeMs < untilMs && !Sim.outcome) {
+      if (events && !cut) {
+        while (ei < events.length && events[ei].t <= State.SimTimeMs) {
+          const ev = events[ei++];
+          if (ev.type === 'input') applyInputEvent(ev.name);
+        }
+      }
+      simStep(SIM_DT);
+      if (Sim.override && Sim.override.done && !cut) {
+        cut = true;
+        releaseHeldControls();
+      }
+      if (onStep && onStep() === true) break;
+    }
+  }
+
+  // Dev overlay `REPLAY CHECK`: restore the history sample from ~3 s before the crash, replay the recorded
+  // inputs silently, and require the same crash at the same sim time (±1 tick) and place (±1 cm).
+  function runReplayCheck() {
+    const crash = Hist.crash;
+    if (!crash || Hist.samples.length === 0) {
+      console.warn('[REPLAY CHECK] nothing to check yet: crash into something first');
+      return null;
+    }
+    let sample = Hist.samples[0];
+    for (const s of Hist.samples) if (s.t <= crash.simTimeMs - 3000) sample = s;
+    const events = Hist.events.filter(e => e.type === 'input');
+    const out = withSilent(() => {
+      restoreSnapshot(sample.snap);
+      simAdvance(crash.simTimeMs + 500, events);
+      return Sim.outcome;
+    });
+    const tickMs = SIM_DT * 1000.0;
+    const dtMs = out ? Math.abs(out.simTimeMs - crash.simTimeMs) : Infinity;
+    const distCm = out && out.pos ? Math.hypot(out.pos.x - crash.pos.x, out.pos.y - crash.pos.y, out.pos.z - crash.pos.z) : Infinity;
+    const pass = !!out && out.type === 'crash' && dtMs <= tickMs + 1e-6 && distCm <= 1.0;
+    const result = {
+      pass, fromMs: sample.t, crashMs: crash.simTimeMs, outcome: out ? out.type : 'none',
+      dtMs, distCm, events: events.length, mode: Tuning.ActiveScreenMode,
+    };
+    console.log(`[REPLAY CHECK] ${pass ? 'PASS' : 'FAIL'}`, result);
+    Hist.lastCheck = result;
+    const el = document.getElementById('replay-check-result');
+    if (el) el.textContent = pass ? `PASS (${dtMs.toFixed(2)} ms, ${distCm.toFixed(3)} cm)` : `FAIL (${result.outcome}, ${dtMs.toFixed(2)} ms, ${distCm.toFixed(2)} cm)`;
+    return result;
+  }
+
+  // --- Crash Debrief: "could you have made it?" (PLAN_CrashEscapeHint §3-4) ---
+  // After a crash the history is rewound and the REAL physics is re-run silently with one different move.
+  // Shown only on the results card, never during play (Rule 4 "Blind Math" still holds in flight).
+  const Analysis = { token: 0, status: 'idle', result: null, job: null };
+
+  const ANALYSIS_SLICE_MS = 8;
+  const ANALYSIS_BUDGET_MS = 1500;
+  const ANALYSIS_TAIL_MS = 2000;                       // judge each candidate this long past the original impact
+  const PUSH_CHARGES = [0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0];
+  const LAUNCH_CHARGES = [0.4, 0.7, 1.0];
+  const LAUNCH_AIM_STEP_DEG = 2.5;
+  const MAX_CHANGED_PUSHES = 3;                        // most recent real pushes tried with other charges
+
+  // Rocks the body could push off right now (surface within reach), nearest first
+  function listPushAnchors(maxCount) {
+    const body = getPushBodyPos();
+    const found = [];
+    for (const obs of getPushCandidates()) {
+      if (obs.destroyed) continue;
+      const c = getPushObstacleCenter(obs);
+      if (Math.abs(c.x - body.x) > Tuning.PushReachCm + obs.radius) continue;
+      const d = c.distanceTo(body) - obs.radius;
+      if (d <= Tuning.PushReachCm) found.push({ obs, d });
+    }
+    found.sort((a, b) => a.d - b.d);
+    return found.slice(0, maxCount).map(f => f.obs);
+  }
+
+  // Distance from the body to the nearest rock surface (no allocations: runs every sim step of every candidate)
+  function simClearance() {
+    const bx = State.CoMPosition.x;
+    const by = State.CoMPosition.y + State.InternalDisplacement.y;
+    const bz = State.CoMPosition.z + State.InternalDisplacement.z;
+    const list = Tuning.ActiveScreenMode === 'ColossalBelt' ? colossalIncomingAsteroids : denseObstacles;
+    let m = Infinity;
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i];
+      if (o.destroyed) continue;
+      const c = o.position || o.mesh.position;
+      const dx = c.x - bx;
+      if (dx > 2500 || dx < -2500) continue;
+      const dy = c.y - by, dz = c.z - bz;
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz) - o.radius;
+      if (d < m) m = d;
+    }
+    return m;
+  }
+
+  function lastSampleAtOrBefore(samples, t) {
+    let best = null;
+    for (const s of samples) {
+      if (s.t <= t) best = s; else break;
+    }
+    return best;
+  }
+
+  function describeObstacle(obs) {
+    if (!obs) return 'rock';
+    if (obs.massKg) return String(obs.name || 'asteroid').toLowerCase(); // Colossal rocks carry designations
+    return obs.isAsteroid === false ? 'debris' : 'rock';
+  }
+
+  // Can the player hold SPACE for charge c ending at endT? Needs the time to exist after the run began and not run
+  // through another real release (that earlier push would not have happened). ignoreFromMs skips the real hold being replaced.
+  function holdFeasible(job, endT, charge, ignoreFromMs) {
+    const startT = endT - (charge / Tuning.PushChargeRatePerSec) * 1000 - 1;
+    if (startT < job.runStartMs) return false;
+    for (const e of job.releaseEvents) {
+      if (e.t > startT && e.t < endT && !(ignoreFromMs !== undefined && e.t >= ignoreFromMs)) return false;
+    }
+    return true;
+  }
+
+  // Candidate moves, most useful first. Runs inside silent mode (it restores samples to look for anchors).
+  function* candidateStream(job) {
+    // 1. "Change your push": same moment, other power (or none) - for the most recent real pushes
+    const pushes = job.pushEvents;
+    for (let i = pushes.length - 1; i >= Math.max(0, pushes.length - MAX_CHANGED_PUSHES); i--) {
+      const pe = pushes[i];
+      const sample = lastSampleAtOrBefore(job.samples, pe.t);
+      if (!sample) continue;
+      const upEv = job.inputEvents.filter(e => e.name === 'spaceUp' && e.t <= pe.t).pop();
+      const downEv = upEv ? job.inputEvents.filter(e => e.name === 'spaceDown' && e.t <= upEv.t).pop() : null;
+      for (const ch of [null].concat(PUSH_CHARGES)) {
+        if (ch !== null && Math.abs(ch - pe.charge) < 0.04) continue;
+        if (ch !== null && upEv && !holdFeasible(job, upEv.t, ch, downEv ? downEv.t : upEv.t)) continue;
+        yield { family: 'change', sample, eventT: pe.t, actual: pe.charge, anchorUid: pe.anchorUid, charge: ch };
+      }
+    }
+    // 2. "Push off X at t": every history sample with a rock in reach, latest first
+    for (let si = job.samples.length - 1; si >= 0; si--) {
+      const sample = job.samples[si];
+      restoreSnapshot(sample.snap);
+      const anchors = listPushAnchors(1); // the one-button push always picks the nearest rock in reach
+      for (const a of anchors) {
+        for (const ch of PUSH_CHARGES) {
+          if (!holdFeasible(job, sample.t, ch)) continue;
+          yield { family: 'push', sample, anchorUid: a.uid, charge: ch };
+        }
+      }
+    }
+    // 3. "Change the launch": only when the launch is inside the window and nothing above worked
+    if (job.prelaunch && job.launch && job.crash.simTimeMs - job.launch.simTimeMs <= HIST_WINDOW_MS &&
+        !job.successes.some(s => s.cand.family !== 'launch')) {
+      const actual = job.prelaunch.launch;
+      for (let aim = -Tuning.MaxAimAngleDeg; aim <= Tuning.MaxAimAngleDeg + 1e-6; aim += LAUNCH_AIM_STEP_DEG) {
+        for (const ch of LAUNCH_CHARGES) {
+          if (Math.abs(aim - actual.aim) < LAUNCH_AIM_STEP_DEG * 0.5 && Math.abs(ch - actual.charge) < 0.15) continue;
+          yield { family: 'launch', aim, charge: ch };
+        }
+      }
+    }
+  }
+
+  // Re-run the real sim from the candidate's moment, apply the one different move, then do nothing.
+  function evalCandidate(job, c, capture) {
+    Sim.outcome = null;
+    Sim.override = null;
+    let events = null;
+    if (c.family === 'launch') {
+      restoreSnapshot(job.prelaunch);
+      State.LaunchAimAngleDeg = c.aim;
+      State.LaunchPushCharge = c.charge;
+      State.bIsChargingPush = true;
+      fireLaunchPush();
+    } else {
+      restoreSnapshot(c.sample.snap);
+      if (c.family === 'push') {
+        clearHeldInput(); // spin stops, nothing is held
+        const anchor = findObstacleByUid(c.anchorUid);
+        if (!anchor) return null;
+        executePushOff(anchor, c.charge);
+      } else {
+        Sim.override = { atMs: c.eventT, charge: c.charge, done: false };
+        events = job.inputEvents;
+      }
+    }
+    let minClear = Infinity;
+    let stepNo = 0;
+    if (capture) capture.push(captureFrame());
+    simAdvance(job.tEnd, events, () => {
+      const m = simClearance();
+      if (m < minClear) minClear = m;
+      if (capture && ++stepNo % HIST_SAMPLE_STEPS === 0) capture.push(captureFrame());
+    });
+    // "Good" = still on course afterwards: the existing doom lookahead must not call it lost
+    Sim.voidSeen = false;
+    if (!Sim.outcome && State.RunPhase === 'Running' && Tuning.ActiveScreenMode !== 'ColossalBelt') {
+      evaluateBackgroundDoomLookahead();
+    }
+    const o = Sim.outcome;
+    Sim.override = null;
+    return {
+      escape: !(o && o.type === 'crash'),
+      good: !(o && o.type === 'crash') && !Sim.voidSeen,
+      margin: minClear,
+      outcome: o ? o.type : 'none',
+    };
+  }
+
+  // Body position (+ every moving rock) at the current sim time, for the ghost replay
+  function captureFrame() {
+    const f = {
+      t: State.SimTimeMs,
+      x: State.CoMPosition.x,
+      y: State.CoMPosition.y + State.InternalDisplacement.y,
+      z: State.CoMPosition.z + State.InternalDisplacement.z,
+      rocks: null,
+    };
+    if (Tuning.ActiveScreenMode === 'ColossalBelt') {
+      f.rocks = {};
+      for (const a of colossalIncomingAsteroids) f.rocks[a.uid] = [a.mesh.position.x, a.mesh.position.y, a.mesh.position.z];
+    }
+    return f;
+  }
+
+  function makeAnalysisJob() {
+    const crash = Hist.crash;
+    const obs = findObstacleByUid(crash.obstacleUid);
+    const events = Hist.events.slice();
+    const job = {
+      token: Analysis.token,
+      crash,
+      samples: Hist.samples.slice(),
+      inputEvents: events.filter(e => e.type === 'input'),
+      releaseEvents: events.filter(e => e.type === 'input' && (e.name === 'spaceUp' || e.name === 'clear')),
+      runStartMs: Hist.launch ? Hist.launch.simTimeMs : 0,
+      pushEvents: events.filter(e => e.type === 'pushRelease'),
+      prelaunch: Hist.prelaunch,
+      launch: Hist.launch,
+      tEnd: crash.simTimeMs + ANALYSIS_TAIL_MS,
+      crashObs: obs,
+      crashThing: obs ? describeObstacle(obs) : (crash.obstacleName ? crash.obstacleName.toLowerCase() : 'rock'),
+      mode: Tuning.ActiveScreenMode,
+      successes: [],
+      evaluated: 0,
+      finished: false,
+      aborted: false,
+      t0: performance.now(),
+    };
+    job.gen = candidateStream(job);
+    return job;
+  }
+
+  function startCrashAnalysis() {
+    Analysis.token++;
+    Analysis.result = null;
+    Analysis.replayData = null;
+    Analysis.job = null;
+    if (!Settings.crashTips || !Hist.crash || Hist.samples.length === 0) {
+      Analysis.status = 'off';
+      setCrashTip('', 'off');
+      return;
+    }
+    Analysis.status = 'running';
+    setCrashTip('Checking…', 'pending');
+    const job = makeAnalysisJob();
+    Analysis.job = job;
+    scheduleAnalysisSlice(job);
+  }
+
+  function scheduleAnalysisSlice(job) {
+    let fired = false;
+    const go = () => {
+      if (fired) return;
+      fired = true;
+      runAnalysisSlice(job);
+    };
+    requestAnimationFrame(go);
+    setTimeout(go, 40); // rAF doesn't fire in hidden tabs
+  }
+
+  function runAnalysisSlice(job) {
+    if (job.token !== Analysis.token) return; // retried / left the card: drop it
+    try {
+      runAnalysisFor(job, ANALYSIS_SLICE_MS);
+    } catch (err) {
+      console.error('[CRASH TIP] analysis failed', err);
+      job.failed = true;
+    }
+    if (job.finished || job.aborted || job.failed) finishAnalysis(job);
+    else scheduleAnalysisSlice(job);
+  }
+
+  // Evaluate candidates for up to sliceMs of wall time (Infinity = run to completion, used by tests)
+  function runAnalysisFor(job, sliceMs) {
+    const start = performance.now();
+    withSilent(() => {
+      Sim.ignoreVoid = true;
+      while (performance.now() - start < sliceMs) {
+        const nx = job.gen.next();
+        if (nx.done) { job.finished = true; return; }
+        job.evaluated++;
+        const res = evalCandidate(job, nx.value);
+        if (res && res.escape) job.successes.push(Object.assign({ cand: nx.value }, res));
+        if (performance.now() - job.t0 > ANALYSIS_BUDGET_MS) { job.aborted = true; return; }
+      }
+    });
+  }
+
+  function roundPower(c) { return Math.round(c * 20) * 5; }
+  function roundSeconds(ms) { return (Math.round(ms / 100) / 10).toFixed(1); }
+
+  // Which way the rock lies as seen from the chase camera (looks down +X; screen right = +Z, up = +Y)
+  function screenSide(from, to) {
+    const dy = to.y - from.y, dz = to.z - from.z;
+    if (Math.abs(dz) >= Math.abs(dy)) return dz >= 0 ? 'right' : 'left';
+    return dy >= 0 ? 'above' : 'below';
+  }
+
+  // Earliest moment (most time to react: the rock has just lit up) at which the push also works over the
+  // next two history samples, so the advice survives a human's ~0.07 s of timing jitter.
+  // entries: successful push candidates against one rock. Returns { t, entries } (entries valid at t).
+  function robustPushWindow(job, entries) {
+    const sampleTimes = job.samples.map(s => s.t);
+    const idx = new Map(sampleTimes.map((t, i) => [t, i]));
+    const byT = new Map();
+    for (const e of entries) {
+      const t = e.cand.sample.t;
+      if (!byT.has(t)) byT.set(t, []);
+      byT.get(t).push(e);
+    }
+    const times = Array.from(byT.keys()).sort((a, b) => a - b);
+    for (const t of times) {
+      const i = idx.get(t);
+      let ok = new Set(byT.get(t).map(e => e.cand.charge));
+      for (let k = 1; k <= 2; k++) {
+        const nt = sampleTimes[i + k];
+        if (nt === undefined) break;
+        const here = new Set((byT.get(nt) || []).map(e => e.cand.charge));
+        ok = new Set(Array.from(ok).filter(c => here.has(c)));
+      }
+      if (ok.size) return { t, entries: byT.get(t).filter(e => ok.has(e.cand.charge)) };
+    }
+    const latest = times[times.length - 1]; // only isolated hits: fall back to the last one
+    return { t: latest, entries: byT.get(latest) };
+  }
+
+  function preferGood(list) {
+    const good = list.filter(s => s.good);
+    return good.length ? good : list;
+  }
+
+  // First matching rule wins (§4.4). Returns { kind, text, chosen }.
+  function chooseAnswer(job) {
+    const crashT = job.crash.simTimeMs;
+    const S = job.successes;
+    const holdNote = (c) => c >= 0.6 ? ` (start holding SPACE about ${(c / Tuning.PushChargeRatePerSec).toFixed(1)} s earlier)` : '';
+
+    // 1. Your own push caused it
+    const lastPush = job.pushEvents[job.pushEvents.length - 1];
+    if (lastPush) {
+      const pool = preferGood(S.filter(s => s.cand.family === 'change' && s.cand.eventT === lastPush.t));
+      if (pool.length) {
+        const dist = (s) => Math.abs((s.cand.charge === null ? 0 : s.cand.charge) - lastPush.charge);
+        pool.sort((a, b) => dist(a) - dist(b) || b.margin - a.margin);
+        const best = pool[0];
+        const actual = roundPower(lastPush.charge);
+        const text = best.cand.charge === null
+          ? `Your push (${actual}%) sent you into it. Not pushing would have cleared it.`
+          : `Your push (${actual}%) sent you into it. About ${roundPower(best.cand.charge)}% would have cleared it${holdNote(best.cand.charge)}.`;
+        return { kind: 'ownPush', text, chosen: best };
+      }
+    }
+
+    // 2. Push off the obstacle that was hit
+    const pushS = S.filter(s => s.cand.family === 'push');
+    const hitPool = preferGood(pushS.filter(s => s.cand.anchorUid === job.crash.obstacleUid));
+    if (hitPool.length) {
+      const win = robustPushWindow(job, hitPool);
+      const latest = win.t;
+      const atLatest = win.entries;
+      const charges = atLatest.map(s => s.cand.charge);
+      const cMin = Math.min(...charges), cMax = Math.max(...charges);
+      let power;
+      if (cMin === cMax) power = `at about ${roundPower(cMin)}% power`;
+      else if (cMax >= 1.0) power = `with ${roundPower(cMin)}% power or more`;
+      else power = `with between ${roundPower(cMin)}% and ${roundPower(cMax)}% power`;
+      // replay shows a charge from the middle of the working range, not an edge of it
+      const byCharge = atLatest.slice().sort((a, b) => a.cand.charge - b.cand.charge);
+      const best = byCharge[Math.floor((byCharge.length - 1) / 2)];
+      const text = `Yes. Push off the ${job.crashThing} you hit when it lit up, ${roundSeconds(crashT - latest)} s before impact, ${power}${holdNote(cMin)}.`;
+      return { kind: 'hitRock', text, chosen: best };
+    }
+
+    // 3. Push off a different obstacle (largest margin)
+    const otherPool = preferGood(pushS.filter(s => s.cand.anchorUid !== job.crash.obstacleUid));
+    if (otherPool.length) {
+      const top = otherPool.slice().sort((a, b) => b.margin - a.margin)[0];
+      const win = robustPushWindow(job, otherPool.filter(s => s.cand.anchorUid === top.cand.anchorUid));
+      const best = win.entries.slice().sort((a, b) => b.margin - a.margin)[0];
+      const sample = best.cand.sample;
+      const obs = (restoreSnapshot(sample.snap), findObstacleByUid(best.cand.anchorUid));
+      const side = obs ? screenSide(sample.body, getPushObstacleCenter(obs)) : 'side';
+      const text = `Yes. Push off the ${describeObstacle(obs)} on your ${side}, ${roundSeconds(crashT - sample.t)} s before impact, at about ${roundPower(best.cand.charge)}% power${holdNote(best.cand.charge)}.`;
+      return { kind: 'otherRock', text, chosen: best };
+    }
+
+    // 4. Launch differently
+    const launchPool = preferGood(S.filter(s => s.cand.family === 'launch'));
+    if (launchPool.length && job.prelaunch) {
+      const actual = job.prelaunch.launch;
+      const cost = (s) => Math.abs(s.cand.aim - actual.aim) + (Math.abs(s.cand.charge - actual.charge) > 0.15 ? 100 : 0);
+      launchPool.sort((a, b) => cost(a) - cost(b) || b.margin - a.margin);
+      const best = launchPool[0];
+      const aimTxt = (a) => `${a > 0 ? '+' : ''}${a.toFixed(1)}`;
+      let text = `Launch at ${aimTxt(best.cand.aim)}° instead of ${aimTxt(actual.aim)}° to miss it.`;
+      if (Math.abs(best.cand.charge - actual.charge) > 0.15) {
+        text = `Launch at ${aimTxt(best.cand.aim)}° with ${roundPower(best.cand.charge)}% power instead of ${aimTxt(actual.aim)}° at ${roundPower(actual.charge)}% to miss it.`;
+      }
+      return { kind: 'launch', text, chosen: best };
+    }
+
+    // 5. Nothing worked
+    const covered = Math.max(1, Math.round((crashT - job.samples[0].t) / 1000));
+    return {
+      kind: 'none',
+      text: `No escape in the last ${covered} s. Your line was set before that — try a different route earlier.`,
+      chosen: null,
+    };
+  }
+
+  function finishAnalysis(job) {
+    job.ms = performance.now() - job.t0;
+    if (job.failed || (job.aborted && job.successes.length === 0)) {
+      Analysis.status = 'failed';
+      Analysis.result = { kind: 'failed', text: "Couldn't check this one", chosen: null };
+      setCrashTip(Analysis.result.text, 'failed');
+    } else {
+      const ans = withSilent(() => chooseAnswer(job));
+      Analysis.status = 'done';
+      Analysis.result = ans;
+      Analysis.replayData = null;
+      if (ans.chosen) {
+        try {
+          Analysis.replayData = buildReplayData(job, ans);
+        } catch (err) {
+          console.error('[CRASH TIP] replay data failed', err);
+        }
+      }
+      setCrashTip(ans.text, ans.kind === 'none' ? 'none' : 'yes');
+    }
+    console.log(`[CRASH TIP] ${Analysis.result.kind}: ${Analysis.result.text} (${job.evaluated} candidates, ${job.successes.length} escapes, ${job.ms.toFixed(0)} ms${job.aborted ? ', aborted' : ''})`);
+  }
+
+  // Run the whole analysis synchronously (tests / dev console)
+  function analyzeCrashSync() {
+    if (!Hist.crash) return null;
+    Analysis.token++;
+    const job = makeAnalysisJob();
+    Analysis.job = job;
+    runAnalysisFor(job, Infinity);
+    job.ms = performance.now() - job.t0;
+    const ans = withSilent(() => chooseAnswer(job));
+    Analysis.status = 'done';
+    Analysis.result = ans;
+    Analysis.replayData = null;
+    if (ans.chosen) Analysis.replayData = buildReplayData(job, ans);
+    return { ans, job };
+  }
+
+  // --- Ghost replay: what you did (red) vs what would have worked (cyan) (§5) ---
+  const Replay = { active: false, camPos: { x: 0, y: 0, z: 0 }, camVel: { x: 0, y: 0, z: 0 } };
+  const REPLAY_PRE_MS = 1500;
+  const REPLAY_SLOW_AFTER_ACTION_MS = 500;
+  const REPLAY_AFTER_IMPACT_MS = 1000;
+  const REPLAY_SLOW_FACTOR = 0.5;
+  const REPLAY_TRAIL_POINTS = 70;
+
+  // Both paths at 30 Hz + the moving rocks, all on the sim clock. The cyan path is the real history up to the
+  // action, then a silent re-run of the chosen move (the same physics the answer came from).
+  function buildReplayData(job, ans) {
+    const cand = ans.chosen.cand;
+    const crash = job.crash;
+    const frames = [];
+    withSilent(() => {
+      Sim.ignoreVoid = true;
+      evalCandidate(job, cand, frames);
+    });
+    const actual = job.samples.map(s => ({ t: s.t, x: s.body.x, y: s.body.y, z: s.body.z }));
+    actual.push({ t: crash.simTimeMs, x: crash.body.x, y: crash.body.y, z: crash.body.z });
+
+    let actionT, label, anchorUid = null;
+    if (cand.family === 'launch') {
+      actionT = job.launch.simTimeMs;
+      const act = job.prelaunch.launch;
+      label = `LAUNCH ${cand.aim >= 0 ? '+' : ''}${cand.aim.toFixed(0)}°`;
+      if (Math.abs(cand.charge - act.charge) > 0.15) label += ` ${roundPower(cand.charge)}%`;
+    } else {
+      actionT = cand.family === 'change' ? cand.eventT : cand.sample.t;
+      anchorUid = cand.anchorUid;
+      label = cand.charge === null ? "DON'T PUSH" : `PUSH ${roundPower(cand.charge)}%`;
+    }
+
+    const cyan = actual.filter(pt => pt.t <= actionT);
+    for (const f of frames) if (f.t > actionT) cyan.push({ t: f.t, x: f.x, y: f.y, z: f.z });
+    if (cyan.length < 2) cyan.push({ t: actionT + 1, x: actual[actual.length - 1].x, y: actual[actual.length - 1].y, z: actual[actual.length - 1].z });
+
+    // Moving rocks: history samples up to the action, then the re-run
+    const rocks = [];
+    for (const s of job.samples) {
+      if (s.t > actionT || !s.snap.ast.length) continue;
+      const m = {};
+      for (const a of s.snap.ast) m[a.uid] = [a.px, a.py, a.pz];
+      rocks.push({ t: s.t, m });
+    }
+    for (const f of frames) if (f.t > actionT && f.rocks) rocks.push({ t: f.t, m: f.rocks });
+
+    return {
+      actual, cyan, rocks, actionT, label, anchorUid,
+      crashT: crash.simTimeMs,
+      charge: cand.family === 'launch' ? cand.charge : cand.charge,
+      isLaunch: cand.family === 'launch',
+    };
+  }
+
+  function pathAt(path, t, out) {
+    const n = path.length;
+    let a, b, k = 0;
+    if (t <= path[0].t) { a = b = path[0]; }
+    else if (t >= path[n - 1].t) { a = b = path[n - 1]; }
+    else {
+      let i = path._i || 0;
+      if (path[i].t > t) i = 0;
+      while (i < n - 2 && path[i + 1].t <= t) i++;
+      path._i = i;
+      a = path[i]; b = path[i + 1];
+      k = (t - a.t) / Math.max(1e-6, b.t - a.t);
+    }
+    out.x = a.x + (b.x - a.x) * k;
+    out.y = a.y + (b.y - a.y) * k;
+    out.z = a.z + (b.z - a.z) * k;
+    return out;
+  }
+
+  function makeGhost(colorHex) {
+    const group = new THREE.Group();
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(42, 20, 14),
+      new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 0.6, depthWrite: false })
+    );
+    const shell = new THREE.Mesh(
+      new THREE.SphereGeometry(70, 20, 14),
+      new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 0.18, depthWrite: false, blending: THREE.AdditiveBlending })
+    );
+    group.add(core);
+    group.add(shell);
+    const positions = new Float32Array(REPLAY_TRAIL_POINTS * 3);
+    const colors = new Float32Array(REPLAY_TRAIL_POINTS * 3);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setDrawRange(0, 0);
+    const trail = new THREE.Line(geo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    trail.frustumCulled = false;
+    scene.add(group);
+    scene.add(trail);
+    const c = new THREE.Color(colorHex);
+    return { group, core, shell, trail, positions, colors, base: [c.r, c.g, c.b] };
+  }
+
+  function disposeGhost(g) {
+    if (!g) return;
+    scene.remove(g.group);
+    scene.remove(g.trail);
+    g.core.geometry.dispose(); g.core.material.dispose();
+    g.shell.geometry.dispose(); g.shell.material.dispose();
+    g.trail.geometry.dispose(); g.trail.material.dispose();
+  }
+
+  const REPLAY_STEP_MS = 1000 / 30;
+  const _rp = { x: 0, y: 0, z: 0 };
+
+  function updateGhost(g, path, t, tMax) {
+    const tt = Math.min(t, tMax);
+    pathAt(path, tt, _rp);
+    g.group.position.set(_rp.x, _rp.y, _rp.z);
+    let n = 0;
+    for (let i = 0; i < REPLAY_TRAIL_POINTS; i++) {
+      const ti = tt - i * REPLAY_STEP_MS;
+      if (ti < path[0].t) break;
+      pathAt(path, ti, _rp);
+      const o = i * 3;
+      g.positions[o] = _rp.x; g.positions[o + 1] = _rp.y; g.positions[o + 2] = _rp.z;
+      const fade = 1 - i / REPLAY_TRAIL_POINTS;
+      g.colors[o] = g.base[0] * fade; g.colors[o + 1] = g.base[1] * fade; g.colors[o + 2] = g.base[2] * fade;
+      n++;
+    }
+    g.trail.geometry.attributes.position.needsUpdate = true;
+    g.trail.geometry.attributes.color.needsUpdate = true;
+    g.trail.geometry.setDrawRange(0, n);
+  }
+
+  function canWatchReplay() {
+    const modal = document.getElementById('crash-modal');
+    return !Replay.active && UI.screen === 'results' && UI.resultsModal === 'crash-modal' &&
+      !!modal && !modal.classList.contains('hidden') && Analysis.status === 'done' && !!Analysis.replayData;
+  }
+
+  function startCrashReplay() {
+    if (!canWatchReplay()) return false;
+    const d = Analysis.replayData;
+    const R = Replay;
+    R.data = d;
+    R.reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    R.t0 = Math.max(d.actual[0].t, d.actionT - REPLAY_PRE_MS);
+    R.tEnd = d.crashT + REPLAY_AFTER_IMPACT_MS;
+    R.t = R.t0;
+    R.first = true;
+    R.flash = null;
+    R.red = makeGhost(0xff3b5c);
+    R.cyan = makeGhost(0x00f0ff);
+    R.prevCyan = null;
+    R.anchorObs = d.anchorUid ? findObstacleByUid(d.anchorUid) : null;
+    R.rockMeshes = [];
+    if (d.rocks.length) {
+      for (const a of colossalIncomingAsteroids) {
+        if (a.uid) R.rockMeshes.push({ ast: a, saved: a.mesh.position.clone() });
+      }
+    }
+    d.actual._i = 0; d.cyan._i = 0;
+    const modal = document.getElementById('crash-modal');
+    if (modal) modal.classList.add('hidden');
+    const hud = document.getElementById('replay-hud');
+    if (hud) hud.classList.remove('hidden');
+    const label = document.getElementById('replay-label');
+    if (label) { label.textContent = d.label; label.classList.add('hidden'); }
+    R.active = true;
+    clearToasts();
+    return true;
+  }
+
+  function updateReplay(dt) {
+    const R = Replay, d = R.data;
+    const slow = !R.reduced && R.t < d.actionT + REPLAY_SLOW_AFTER_ACTION_MS;
+    R.t += dt * 1000 * (slow ? REPLAY_SLOW_FACTOR : 1);
+    if (R.t >= R.tEnd) { stopCrashReplay(); return; }
+
+    updateGhost(R.red, d.actual, R.t, d.crashT);
+    updateGhost(R.cyan, d.cyan, R.t, R.tEnd);
+
+    // chase camera follows the suggested (cyan) ghost
+    pathAt(d.cyan, R.t, _rp);
+    const prev = R.prevCyan;
+    const simDt = prev ? Math.max(1, R.t - prev.t) / 1000 : 0;
+    if (prev && simDt > 0) {
+      R.camVel.x = (_rp.x - prev.x) / simDt; R.camVel.y = (_rp.y - prev.y) / simDt; R.camVel.z = (_rp.z - prev.z) / simDt;
+    } else {
+      R.camVel.x = 3000; R.camVel.y = 0; R.camVel.z = 0;
+    }
+    R.prevCyan = { t: R.t, x: _rp.x, y: _rp.y, z: _rp.z };
+    R.camPos.x = _rp.x; R.camPos.y = _rp.y; R.camPos.z = _rp.z;
+    if (R.first) {
+      R.first = false;
+      camera.position.set(_rp.x - State.CameraDistance, _rp.y * 0.45, _rp.z * 0.45 + 120);
+    }
+
+    // moving rocks replay from the recorded tracks
+    if (R.rockMeshes.length) {
+      const tr = d.rocks;
+      let i = 0;
+      while (i < tr.length - 1 && tr[i + 1].t <= R.t) i++;
+      const a = tr[i], b = tr[Math.min(tr.length - 1, i + 1)];
+      const k = b.t > a.t ? Math.min(1, Math.max(0, (R.t - a.t) / (b.t - a.t))) : 0;
+      for (const rm of R.rockMeshes) {
+        const pa = a.m[rm.ast.uid];
+        if (!pa) continue;
+        const pb = b.m[rm.ast.uid] || pa;
+        rm.ast.mesh.position.set(pa[0] + (pb[0] - pa[0]) * k, pa[1] + (pb[1] - pa[1]) * k, pa[2] + (pb[2] - pa[2]) * k);
+      }
+    }
+
+    // impact flash where the red ghost ends
+    if (!R.flash && R.t >= d.crashT) {
+      const cp = d.actual[d.actual.length - 1];
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(60, 16, 12),
+        new THREE.MeshBasicMaterial({ color: 0xff6b4a, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false })
+      );
+      mesh.position.set(cp.x, cp.y, cp.z);
+      scene.add(mesh);
+      R.flash = { mesh, age: 0 };
+      spawnKineticSparks(new THREE.Vector3(cp.x, cp.y, cp.z), 40);
+    }
+    if (R.flash) {
+      R.flash.age += dt;
+      const s = 1 + R.flash.age * 7;
+      R.flash.mesh.scale.setScalar(s);
+      R.flash.mesh.material.opacity = Math.max(0, 0.95 - R.flash.age * 1.6);
+    }
+  }
+
+  // Label + rim pulse at the action moment (after the camera has moved)
+  function updateReplayOverlay() {
+    const R = Replay, d = R.data;
+    const label = document.getElementById('replay-label');
+    const inWindow = R.t >= d.actionT - 250 && R.t <= d.actionT + 1400;
+    if (R.anchorObs) {
+      const pulse = R.t >= d.actionT - 400 && R.t <= d.actionT + 250;
+      if (pulse) setPushAnchorHighlight(R.anchorObs, true, 0.35 + 0.65 * Math.abs(Math.sin(performance.now() * 0.012)), false);
+      else setPushAnchorHighlight(R.anchorObs, false, 0);
+    }
+    if (!label) return;
+    if (!inWindow) { label.classList.add('hidden'); return; }
+    camera.updateMatrixWorld();
+    const wp = R.anchorObs ? getPushObstacleCenter(R.anchorObs) : new THREE.Vector3(R.camPos.x, R.camPos.y, R.camPos.z);
+    const v = new THREE.Vector3(wp.x, wp.y, wp.z).project(camera);
+    if (v.z > 1.0) { label.classList.add('hidden'); return; }
+    label.style.left = `${(v.x * 0.5 + 0.5) * window.innerWidth}px`;
+    label.style.top = `${(-v.y * 0.5 + 0.5) * window.innerHeight}px`;
+    label.classList.remove('hidden');
+  }
+
+  // Skip or end: ghosts, trail, label and rim pulse go away, rocks go back, the crash card returns with RETRY focused
+  function stopCrashReplay() {
+    const R = Replay;
+    if (!R.active) return;
+    R.active = false;
+    disposeGhost(R.red); disposeGhost(R.cyan);
+    R.red = R.cyan = null;
+    if (R.flash) {
+      scene.remove(R.flash.mesh);
+      R.flash.mesh.geometry.dispose(); R.flash.mesh.material.dispose();
+      R.flash = null;
+    }
+    if (R.anchorObs) setPushAnchorHighlight(R.anchorObs, false, 0);
+    for (const rm of R.rockMeshes || []) rm.ast.mesh.position.copy(rm.saved);
+    R.rockMeshes = [];
+    const hud = document.getElementById('replay-hud');
+    if (hud) hud.classList.add('hidden');
+    const label = document.getElementById('replay-label');
+    if (label) label.classList.add('hidden');
+    // camera back on the crash scene
+    camera.position.set(State.CoMPosition.x - State.CameraDistance, State.CoMPosition.y * 0.45, State.CoMPosition.z * 0.45 + 120);
+    simAccumulator = 0;
+    lastTime = performance.now();
+    if (UI.screen === 'results' && UI.resultsModal === 'crash-modal') {
+      const modal = document.getElementById('crash-modal');
+      if (modal) modal.classList.remove('hidden');
+      UI.menuIndex = 0;
+      selectMenuItem(0);
+    }
+  }
+
+  function setCrashTip(text, variant) {
+    const block = document.getElementById('crash-tip');
+    const el = document.getElementById('crash-tip-text');
+    if (block) block.classList.toggle('hidden', !Settings.crashTips);
+    if (el) {
+      el.className = `crash-tip-text ${variant || ''}`;
+      el.textContent = '';
+      // "Yes." reads cyan, "No escape" rose
+      const lead = /^(Yes\.|No escape)/.exec(text);
+      if (lead) {
+        const span = document.createElement('span');
+        span.className = lead[1] === 'Yes.' ? 'tip-yes' : 'tip-no';
+        span.textContent = lead[1];
+        el.appendChild(span);
+        el.appendChild(document.createTextNode(text.slice(lead[1].length)));
+      } else {
+        el.textContent = text;
+      }
+    }
+    refreshWatchButton();
+  }
+
+  // ▶ WATCH is offered only when there is a move to show
+  function refreshWatchButton() {
+    const btn = document.getElementById('btn-crash-watch');
+    if (!btn) return;
+    const show = Settings.crashTips && Analysis.status === 'done' && !!Analysis.replayData;
+    if (btn.classList.contains('hidden') === !show) return;
+    btn.classList.toggle('hidden', !show);
+    if (UI.screen === 'results' && UI.resultsModal === 'crash-modal') selectMenuItem(UI.menuIndex);
+  }
+
   // --- Fixed 120Hz Physics Tick ---
   let doomCheckAccumulator = 0;
 
   function physicsTick(dt) {
     if (dt <= 0) return;
+    State.SimTimeMs += dt * 1000.0;
 
     // 0. Launch Push-Off Phase State Logic (§1.4)
     if (State.RunPhase === 'LaunchPushOff') {
@@ -1229,7 +2307,7 @@
         nearestObsPos = obs.position;
       }
     }
-    updateProximityRadarAlarm(minObsDistCm, performance.now() / 1000.0, nearestObsPos);
+    updateProximityRadarAlarm(minObsDistCm, State.SimTimeMs / 1000.0, nearestObsPos);
     updateContinuousEngineHumAudio(State.CoMVelocity.x, Math.hypot(State.CoMVelocity.y, State.CoMVelocity.z));
 
     // 8. Slalom Gate Evasions
@@ -1334,7 +2412,7 @@
       }
 
       // 2. Fatal Kinetic Crash check against fragile astronaut body
-      const timeSinceLastDeflection = (performance.now() - State.LastStrikeTime) / 1000.0;
+      const timeSinceLastDeflection = (State.SimTimeMs - State.LastStrikeTime) / 1000.0;
       if (!bDeflectedByAppendage && timeSinceLastDeflection > 0.12) {
         const distToBody = astronautWorldPos.distanceTo(obs.position);
         if (distToBody <= (obs.radius + astronautBodyRadius)) {
@@ -1417,6 +2495,10 @@
   function completeSectorRun() {
     if (State.RunPhase !== 'Running') return;
     State.RunPhase = 'Completed';
+    if (Sim.silent) {
+      Sim.outcome = { type: 'complete', simTimeMs: State.SimTimeMs, obstacle: null };
+      return;
+    }
 
     const currentSector = SectorCatalog[State.CurrentSectorIndex];
     const totalDistMeters = currentSector.corridorLengthCm * 0.01;
@@ -1546,6 +2628,7 @@
   }
 
   function triggerWarpJumpFlash(colorStr) {
+    if (Sim.silent) return;
     const container = document.getElementById('canvas-container');
     if (container) {
       container.style.filter = `brightness(2.2) drop-shadow(0 0 60px ${colorStr || '#00f0ff'})`;
@@ -2134,6 +3217,7 @@
   }
 
   function spawnKineticSparks(originPos, count) {
+    if (Sim.silent) return;
     let spawned = 0;
     for (const p of sparkParticles) {
       if (p.life <= 0) {
@@ -2261,47 +3345,56 @@
   let colossalAsteroidSeq = 1;
 
   function spawnIncomingColossalAsteroid(spawnForwardX) {
-    if (!colossalBeltGroup) return;
+    if (!Sim.silent && !colossalBeltGroup) return;
 
+    // Physics-affecting randomness comes from the seeded sim RNG (same draw order live and silent);
+    // cosmetic randomness (crag shape, spin, label number) stays on Math.random.
     // Radius between 450cm and 1800cm (9m to 36m diameter), scaled by tuning knob
-    const baseRadius = (450 + Math.random() * 1350) * Tuning.ColossalAsteroidScale;
-    const geo = new THREE.IcosahedronGeometry(baseRadius, 1);
+    const baseRadius = (450 + simRandom() * 1350) * Tuning.ColossalAsteroidScale;
+    const offsetTheta = simRandom() * Math.PI * 2;
+    const offsetR = 250 + simRandom() * 1800;
+    const speed = Tuning.IncomingAsteroidSpeedCmPerSec * (0.85 + simRandom() * 0.35);
+    // Polar angle theta from negative X axis (0 to 28 degrees)
+    const angleFromForward = (simRandom() * 28.0) * (Math.PI / 180.0);
+    const azim = simRandom() * Math.PI * 2;
 
-    // Perturb vertices for rugged craggy asteroid shape
-    const posAttr = geo.attributes.position;
-    for (let i = 0; i < posAttr.count; i++) {
-      const vx = posAttr.getX(i);
-      const vy = posAttr.getY(i);
-      const vz = posAttr.getZ(i);
-      const perturb = 1.0 + (Math.random() - 0.5) * 0.28;
-      posAttr.setXYZ(i, vx * perturb, vy * perturb, vz * perturb);
+    let mesh;
+    if (Sim.silent) {
+      // Silent re-runs only need the collider: position/rotation stand-ins, no geometry or scene node
+      mesh = { position: new THREE.Vector3(), rotation: { x: 0, y: 0, z: 0 }, geometry: null, material: null };
+    } else {
+      const geo = new THREE.IcosahedronGeometry(baseRadius, 1);
+
+      // Perturb vertices for rugged craggy asteroid shape
+      const posAttr = geo.attributes.position;
+      for (let i = 0; i < posAttr.count; i++) {
+        const vx = posAttr.getX(i);
+        const vy = posAttr.getY(i);
+        const vz = posAttr.getZ(i);
+        const perturb = 1.0 + (Math.random() - 0.5) * 0.28;
+        posAttr.setXYZ(i, vx * perturb, vy * perturb, vz * perturb);
+      }
+      geo.computeVertexNormals();
+
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x334155,
+        roughness: 0.85,
+        metalness: 0.25,
+        flatShading: true,
+      });
+
+      mesh = new THREE.Mesh(geo, mat);
+      mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      colossalBeltGroup.add(mesh);
     }
-    geo.computeVertexNormals();
-
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x334155,
-      roughness: 0.85,
-      metalness: 0.25,
-      flatShading: true,
-    });
-
-    const mesh = new THREE.Mesh(geo, mat);
 
     // Position: forward at spawnForwardX, radial offset in Y, Z
-    const offsetTheta = Math.random() * Math.PI * 2;
-    const offsetR = 250 + Math.random() * 1800;
     const spawnY = State.CoMPosition.y + Math.cos(offsetTheta) * offsetR;
     const spawnZ = State.CoMPosition.z + Math.sin(offsetTheta) * offsetR;
     mesh.position.set(spawnForwardX, spawnY, spawnZ);
-    mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-    colossalBeltGroup.add(mesh);
 
     // Velocity: MUST have at least one component from the forward (vx < 0)
     // and can approach from ANY radial angle
-    const speed = Tuning.IncomingAsteroidSpeedCmPerSec * (0.85 + Math.random() * 0.35);
-    // Polar angle theta from negative X axis (0 to 28 degrees)
-    const angleFromForward = (Math.random() * 28.0) * (Math.PI / 180.0);
-    const azim = Math.random() * Math.PI * 2;
 
     const vx = -speed * Math.cos(angleFromForward);
     const vy = speed * Math.sin(angleFromForward) * Math.cos(azim);
@@ -2312,10 +3405,12 @@
     const volumeM3 = (4.0 / 3.0) * Math.PI * Math.pow(radiusMeters, 3);
     const massKg = Math.round(volumeM3 * 2600.0);
 
+    const uid = 'c' + colossalAsteroidSeq;
     const nameLetter = ColossalGreekLetters[(colossalAsteroidSeq++) % ColossalGreekLetters.length];
     const designation = `ASTEROID [${nameLetter}-${Math.floor(10 + Math.random() * 90)}]`;
 
     colossalIncomingAsteroids.push({
+      uid: uid,
       mesh: mesh,
       radius: baseRadius,
       massKg: massKg,
@@ -2420,10 +3515,12 @@
     );
 
     // 1. Rotate background outer belt monoliths
-    for (const bg of colossalBackgroundAsteroids) {
-      bg.mesh.rotation.x += bg.rotSpeed.x * dt;
-      bg.mesh.rotation.y += bg.rotSpeed.y * dt;
-      bg.mesh.rotation.z += bg.rotSpeed.z * dt;
+    if (!Sim.silent) {
+      for (const bg of colossalBackgroundAsteroids) {
+        bg.mesh.rotation.x += bg.rotSpeed.x * dt;
+        bg.mesh.rotation.y += bg.rotSpeed.y * dt;
+        bg.mesh.rotation.z += bg.rotSpeed.z * dt;
+      }
     }
 
     // 2. Advance oncoming asteroids
@@ -2458,7 +3555,7 @@
                         + (State.CoMVelocity.z - ast.velocity.z) * n.z);
 
         if (closing > Tuning.ColossalCrashSpeedCmPerSec) {
-          triggerKineticCrash({ name: ast.name, isAsteroid: true }, relSpeed);
+          triggerKineticCrash({ name: ast.name, isAsteroid: true, uid: ast.uid }, relSpeed);
           return;
         }
 
@@ -2472,18 +3569,22 @@
           State.CoMPosition.y += n.y * sep;
           State.CoMPosition.z += n.z * sep;
 
-          playAsteroidOverpoweredSound();
-          triggerAsteroidOverpowerFlash();
+          if (!Sim.silent) {
+            playAsteroidOverpoweredSound();
+            triggerAsteroidOverpowerFlash();
+            spawnKineticSparks(playerPos, 40);
+          }
           State.CameraTrauma = 1.0;
-          spawnKineticSparks(playerPos, 40);
         }
       }
 
       // Despawn if far behind player or deflected far out
       if (ast.mesh.position.x < State.CoMPosition.x - 6000 || ast.mesh.position.length() > 90000) {
-        colossalBeltGroup.remove(ast.mesh);
-        if (ast.mesh.geometry) ast.mesh.geometry.dispose();
-        if (ast.mesh.material) ast.mesh.material.dispose();
+        if (!Sim.silent) {
+          colossalBeltGroup.remove(ast.mesh);
+          if (ast.mesh.geometry) ast.mesh.geometry.dispose();
+          if (ast.mesh.material) ast.mesh.material.dispose();
+        }
         colossalIncomingAsteroids.splice(i, 1);
       }
     }
@@ -2492,11 +3593,11 @@
     colossalSpawnTimer += dt;
     if (colossalIncomingAsteroids.length < 5 && colossalSpawnTimer >= 1.8) {
       colossalSpawnTimer = 0;
-      spawnIncomingColossalAsteroid(State.CoMPosition.x + 16000 + Math.random() * 4000);
+      spawnIncomingColossalAsteroid(State.CoMPosition.x + 16000 + simRandom() * 4000);
     }
 
     // 3. Update expanding kinetic shockwave ring
-    if (kineticShockwaveMesh && kineticShockwaveMesh.visible) {
+    if (!Sim.silent && kineticShockwaveMesh && kineticShockwaveMesh.visible) {
       kineticShockwaveMesh.scale.addScalar(dt * 35.0);
       kineticShockwaveMesh.material.opacity -= dt * 2.8;
       if (kineticShockwaveMesh.material.opacity <= 0.0) {
@@ -2553,7 +3654,7 @@
   }
 
   function setPushAnchorHighlight(obs, bOn, charge, bDanger) {
-    if (!obs || !obs.mesh || !obs.mesh.material || !obs.mesh.material.emissive) return;
+    if (Sim.silent || !obs || !obs.mesh || !obs.mesh.material || !obs.mesh.material.emissive) return;
     const mat = obs.mesh.material;
     if (bOn) {
       if (!obs.pushRimSaved) {
@@ -2598,17 +3699,17 @@
     if (anchor) {
       executePushOff(anchor, charge);
     } else {
-      State.PushBuffer = { until: performance.now() + Tuning.PushReleaseBufferMs, charge: charge };
+      State.PushBuffer = { until: State.SimTimeMs + Tuning.PushReleaseBufferMs, charge: charge };
     }
   }
 
   function updatePushOff(dt) {
     // First-runs teaching cue: the first time any rock enters reach in a run
-    if (!State.PushCueShown && HUD.hintRuns <= HINT_MAX_RUNS) {
+    if (!Sim.silent && !State.PushCueShown && HUD.hintRuns <= HINT_MAX_RUNS) {
       const first = findPushAnchor();
       if (first) {
         State.PushCueShown = true;
-        State.PushCue = { obs: first, until: performance.now() + 1000 };
+        State.PushCue = { obs: first, until: State.SimTimeMs + 1000 };
       }
     }
 
@@ -2619,7 +3720,7 @@
         const charge = State.PushBuffer.charge;
         State.PushBuffer = null;
         executePushOff(anchor, charge);
-      } else if (performance.now() > State.PushBuffer.until) {
+      } else if (State.SimTimeMs > State.PushBuffer.until) {
         State.PushBuffer = null;
         playPushWhiffSound();
       }
@@ -2652,6 +3753,16 @@
   }
 
   function executePushOff(anchor, charge) {
+    // Crash analysis: "what if that push had been different?" swaps or drops the real push at its moment
+    const ov = Sim.override;
+    if (ov && !ov.done && State.SimTimeMs >= ov.atMs) {
+      ov.done = true;
+      if (ov.charge === null) return;
+      charge = ov.charge;
+    }
+    if (!Sim.silent && Hist.active) {
+      Hist.events.push({ t: State.SimTimeMs, type: 'pushRelease', charge: charge, anchorUid: anchor.uid || null });
+    }
     const body = getPushBodyPos();
     const center = getPushObstacleCenter(anchor);
     const n = new THREE.Vector3().subVectors(body, center);
@@ -2680,7 +3791,7 @@
       State.MaceSnap = { targetRad: Math.atan2(latZ, latY), remaining: 0.1 };
     }
 
-    if (anchor.massKg && kineticShockwaveMesh) {
+    if (!Sim.silent && anchor.massKg && kineticShockwaveMesh) {
       kineticShockwaveMesh.position.copy(contact);
       kineticShockwaveMesh.lookAt(body);
       kineticShockwaveMesh.scale.set(1, 1, 1);
@@ -2720,6 +3831,7 @@
   }
 
   function triggerAsteroidOverpowerFlash() {
+    if (Sim.silent) return;
     showToast('OVERPOWERED!', 'rose');
     const container = document.getElementById('canvas-container');
     if (container) {
@@ -2972,6 +4084,7 @@
         scene.add(mesh);
 
         denseObstacles.push({
+          uid: 'd' + denseObstacles.length,
           position: new THREE.Vector3(posX, posY, posZ),
           radius: radius,
           mesh: mesh,
@@ -3055,6 +4168,7 @@
   }
 
   function triggerKickFlash() {
+    if (Sim.silent) return;
     const container = document.getElementById('canvas-container');
     container.style.filter = 'brightness(1.4) drop-shadow(0 0 24px rgba(0,240,255,0.7))';
     setTimeout(() => { container.style.filter = 'none'; }, 130);
@@ -3062,6 +4176,14 @@
 
   // --- Render Loop ---
   let lastTime = performance.now();
+  let simAccumulator = 0;
+
+  // One fixed 120 Hz sim step: the same unit the silent crash re-runs use
+  function simStep(dt) {
+    physicsTick(dt);
+    if (Tuning.ActiveScreenMode === 'ColossalBelt') updateColossalAsteroidBelt(dt);
+    if (!Sim.silent && Hist.active) histAfterStep();
+  }
 
   function animate() {
     requestAnimationFrame(animate);
@@ -3074,22 +4196,23 @@
     // Title / pause freeze the simulation but keep rendering
     const simActive = UI.screen !== 'paused' && UI.screen !== 'title';
 
-    if (simActive) {
-      // 120Hz Substepping
-      const substeps = 4;
-      const subDt = dt / substeps;
-      for (let s = 0; s < substeps; s++) {
-        physicsTick(subDt);
-      }
+    if (Replay.active) updateReplay(dt);
 
-      if (Tuning.ActiveScreenMode === 'ColossalBelt') {
-        updateColossalAsteroidBelt(dt);
+    if (simActive) {
+      // Fixed-step accumulator at 120 Hz (replayable: every step has the same dt); frozen during the ghost replay
+      if (!Replay.active) {
+        simAccumulator += dt;
+        while (simAccumulator >= SIM_DT) {
+          simStep(SIM_DT);
+          simAccumulator -= SIM_DT;
+        }
       }
 
       updateHyperspaceSpeedDust(dt);
       updateKineticSparks(dt);
     }
     update3DVisuals();
+    if (Replay.active) updateReplayOverlay();
     updateHUD();
     drawTacticalRadar();
 
@@ -3290,21 +4413,23 @@
     }
 
     // 8. Dynamic Step 5 Chase Camera Rig
-    const fwdSpeed = State.CoMVelocity.x || 3000.0;
+    const camPos = Replay.active ? Replay.camPos : State.CoMPosition;
+    const camVel = Replay.active ? Replay.camVel : State.CoMVelocity;
+    const fwdSpeed = camVel.x || 3000.0;
     const camSpeedRatio = Math.min(1.5, Math.max(0, (fwdSpeed - 2000.0) / 2500.0));
     const targetArmDist = 650.0 + camSpeedRatio * 120.0;
     State.CameraDistance += (targetArmDist - State.CameraDistance) * 0.12;
 
-    const targetCamX = State.CoMPosition.x - State.CameraDistance;
-    const targetCamY = State.CoMPosition.y * 0.45;
-    const targetCamZ = State.CoMPosition.z * 0.45 + 120;
+    const targetCamX = camPos.x - State.CameraDistance;
+    const targetCamY = camPos.y * 0.45;
+    const targetCamZ = camPos.z * 0.45 + 120;
     camera.position.x += (targetCamX - camera.position.x) * 0.18;
     camera.position.y += (targetCamY - camera.position.y) * 0.18;
     camera.position.z += (targetCamZ - camera.position.z) * 0.18;
-    camera.lookAt(State.CoMPosition.x + 800, State.CoMPosition.y * 0.8, State.CoMPosition.z * 0.8);
+    camera.lookAt(camPos.x + 800, camPos.y * 0.8, camPos.z * 0.8);
 
     // Dutch roll banking during lateral dodge/momentum kick
-    const totalLatY = State.CoMVelocity.y;
+    const totalLatY = camVel.y;
     const targetRoll = -(totalLatY / 1600.0) * (Tuning.MaxDutchRollDeg * Math.PI / 180.0);
     State.CameraRollDeg += (targetRoll - State.CameraRollDeg) * 0.15;
     camera.rotation.z += State.CameraRollDeg;
@@ -3322,7 +4447,7 @@
     camera.updateProjectionMatrix();
 
     if (starsParticles) {
-      starsParticles.position.x = State.CoMPosition.x;
+      starsParticles.position.x = camPos.x;
     }
   }
 
@@ -3603,7 +4728,7 @@
       if (!el.classList.contains('hidden')) el.classList.add('hidden');
       return;
     }
-    const remainingMs = cue.until - performance.now();
+    const remainingMs = cue.until - State.SimTimeMs;
     if (remainingMs <= 0 || cue.obs.destroyed) {
       State.PushCue = null;
       el.classList.add('hidden');
@@ -4058,6 +5183,7 @@
 
   // Drop held keys + in-progress charges so releases during a menu never fire kicks/pushes
   function clearHeldInput() {
+    if (!Sim.silent && Hist.active) Hist.events.push({ t: State.SimTimeMs, type: 'input', name: 'clear' });
     Input.isAPressed = false;
     Input.isDPressed = false;
     Input.isSpacePressed = false;
@@ -4067,7 +5193,7 @@
     State.LaunchPushCharge = 0.0;
     State.KineticPushCharge = 0.0;
     clearPushState();
-    const btn = document.getElementById('btn-charge-push');
+    const btn = Sim.silent ? null : document.getElementById('btn-charge-push');
     if (btn) btn.classList.remove('charging');
   }
 
@@ -4201,6 +5327,8 @@
       case 'retry': restartRun(); break;
       case 'quit':
       case 'menu': quitToTitle(); break;
+      case 'watch': startCrashReplay(); break;
+      case 'crashtips': toggleCrashTips(); break;
       case 'next': loadSector(State.CurrentSectorIndex < 3 ? State.CurrentSectorIndex + 1 : 1); break;
     }
   }
@@ -4209,6 +5337,19 @@
   function handleMenuKey(e, key) {
     const screen = UI.screen;
     const playing = screen === 'playing';
+
+    // While the ghost replay plays only Esc / Space / Enter do anything (skip)
+    if (Replay.active) {
+      if (key === 'escape' || key === ' ' || key === 'enter') {
+        e.preventDefault();
+        stopCrashReplay();
+      }
+      return true;
+    }
+    if (!UI.sub && key === 'w' && screen === 'results' && canWatchReplay()) {
+      startCrashReplay();
+      return true;
+    }
 
     if (key === 'escape') {
       e.preventDefault();
@@ -4260,6 +5401,10 @@
       if (item && item.dataset && screen === 'title' && !UI.sub) {
         e.preventDefault();
         if (cycleTitleOption(item.dataset.action, key === 'arrowleft' ? -1 : 1)) playMenuBlip(false);
+      } else if (item && item.dataset && item.dataset.action === 'crashtips') {
+        e.preventDefault();
+        toggleCrashTips();
+        playMenuBlip(false);
       }
     } else if (key === 'enter') {
       const item = items[UI.menuIndex];
@@ -4272,6 +5417,17 @@
   }
 
   // --- Audio settings (menu sliders mirror the dev-drawer sliders; persisted to localStorage) ---
+  function syncCrashTipsUI() {
+    const el = document.getElementById('set-crashtips-val');
+    if (el) el.textContent = Settings.crashTips ? 'ON' : 'OFF';
+  }
+
+  function toggleCrashTips() {
+    Settings.crashTips = !Settings.crashTips;
+    syncCrashTipsUI();
+    saveSettings();
+  }
+
   function syncAudioUI() {
     for (const [menuId, prop, menuValId, drawerId, drawerValId] of AUDIO_SETTINGS) {
       const pct = Math.round(Tuning[prop] * 100);
@@ -4288,6 +5444,7 @@
     try {
       const data = {};
       for (const [, prop] of AUDIO_SETTINGS) data[prop] = Tuning[prop];
+      data.crashTips = Settings.crashTips;
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
     } catch (e) {}
   }
@@ -4300,9 +5457,11 @@
           const v = parseFloat(data[prop]);
           if (isFinite(v)) Tuning[prop] = Math.max(0, Math.min(1, v));
         }
+        if (typeof data.crashTips === 'boolean') Settings.crashTips = data.crashTips;
       }
     } catch (e) {}
     syncAudioUI();
+    syncCrashTipsUI();
   }
 
   function setupMenus() {
@@ -4363,20 +5522,11 @@
 
     if (key === ' ' || e.code === 'Space') {
       e.preventDefault();
-      Input.isSpacePressed = true;
-      if (State.RunPhase === 'LaunchPushOff') {
-        startChargingPush();
-      } else if (State.RunPhase === 'Running' && !e.repeat) {
-        startPushCharge();
-      }
+      applyInputEvent('spaceDown');
     } else if (key === 'a') {
-      Input.isAPressed = true;
-      Input.lastAPressTime = performance.now();
-      evaluateActiveSpin();
+      applyInputEvent('aDown');
     } else if (key === 'd') {
-      Input.isDPressed = true;
-      Input.lastDPressTime = performance.now();
-      evaluateActiveSpin();
+      applyInputEvent('dDown');
     }
   });
 
@@ -4385,19 +5535,12 @@
 
     if (key === ' ' || e.code === 'Space') {
       if (UI.screen === 'playing') e.preventDefault();
-      Input.isSpacePressed = false;
-      if (UI.screen !== 'playing') return;
-      if (State.RunPhase === 'LaunchPushOff') {
-        fireLaunchPush();
-      } else {
-        releasePush();
-      }
+      if (UI.screen !== 'playing') { Input.isSpacePressed = false; return; }
+      applyInputEvent('spaceUp');
     } else if (key === 'a') {
-      Input.isAPressed = false;
-      if (UI.screen === 'playing') evaluateActiveSpin();
+      if (UI.screen === 'playing') applyInputEvent('aUp'); else Input.isAPressed = false;
     } else if (key === 'd') {
-      Input.isDPressed = false;
-      if (UI.screen === 'playing') evaluateActiveSpin();
+      if (UI.screen === 'playing') applyInputEvent('dUp'); else Input.isDPressed = false;
     }
   });
 
@@ -4641,18 +5784,32 @@
     if (chargeBtn) {
       chargeBtn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
-        startChargingPush();
+        applyInputEvent('launchDown');
       });
       window.addEventListener('pointerup', () => {
         if (State.bIsChargingPush) {
-          fireLaunchPush();
+          applyInputEvent('launchUp');
         }
       });
     }
   }
 
+  // Dev overlay: REPLAY CHECK
+  function setupReplayCheck() {
+    const btn = document.getElementById('btn-replay-check');
+    if (btn) btn.addEventListener('click', () => { runReplayCheck(); btn.blur(); });
+    // Console / test-harness access (?dev=1 only)
+    if (/[?&]dev=1/.test(window.location.search)) {
+      window.__sm = { State, Input, Sim, Hist, Tuning, applyInputEvent, runReplayCheck, restartRun, setScreenMode,
+        loadSector, getDense: () => denseObstacles, getColossal: () => colossalIncomingAsteroids, UI,
+        showScreen, startRunFromTitle, simStep, startCrashReplay, stopCrashReplay, Replay, getCamera: () => camera, rebaseHistory: () => { Hist.samples.length = 0; Hist.events.length = 0; Hist.prelaunch = null; recordHistorySample(); }, Analysis, analyzeCrashSync, chooseAnswer, Settings,
+        restoreSnapshot, takeSnapshot, withSilent, simAdvance, findObstacleByUid };
+    }
+  }
+
   // Initialize
   init3D();
+  setupReplayCheck();
   setupTuningDrawer();
   setupMenus();
   if (/[?&]dev=1/.test(window.location.search)) setDevOverlay(true);

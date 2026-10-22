@@ -11,6 +11,7 @@ A physics-driven space odyssey built in **Unreal Engine 5.8**. You can't brake a
 | **SPACE** (hold, release) | Wind up and push off a nearby rock (also launches you off the start rock) |
 | **Esc** | Pause |
 | **R** | Restart |
+| **W** (on the crash screen) | Watch what would have worked |
 
 ## Getting Started
 1. Install **Unreal Engine 5.8** (Epic Games Launcher) and **Visual Studio 2022** with the *Game development with C++* workload.
