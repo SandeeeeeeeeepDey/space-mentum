@@ -1585,6 +1585,12 @@ body[data-screen="title"] .center-crosshair { display: none; }
 .replay-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: -6px; }
 .replay-swatch.red { background: #ff3b5c; box-shadow: 0 0 10px #ff3b5c; }
 .replay-swatch.cyan { background: #00f0ff; box-shadow: 0 0 10px #00f0ff; }
+.replay-keys { position: fixed; left: 0; right: 0; bottom: 44px; display: flex; justify-content: center; gap: 10px; }
+.rk { position: relative; overflow: hidden; min-width: 54px; padding: 12px 14px; text-align: center; font-size: 14px; font-weight: 700;
+  letter-spacing: 0.12em; color: rgba(255, 255, 255, 0.45); background: rgba(2, 8, 16, 0.7); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 6px; }
+.rk-wide { min-width: 190px; }
+.rk.on { color: #021018; background: #00f0ff; border-color: #00f0ff; box-shadow: 0 0 18px rgba(0, 240, 255, 0.7); }
+.rk i { position: absolute; left: 0; bottom: 0; height: 4px; width: 0; background: #ffb703; }
 .replay-skip { margin-top: 8px; font-size: 10px; letter-spacing: 0.2em; opacity: 0.5; }
 .replay-label { position: fixed; z-index: 61; transform: translate(-50%, -140%); pointer-events: none; padding: 5px 12px;
   font-size: 15px; font-weight: 700; letter-spacing: 0.14em; color: #00f0ff; background: rgba(2, 8, 16, 0.72);

@@ -1628,6 +1628,14 @@
       y: State.CoMPosition.y + State.InternalDisplacement.y,
       z: State.CoMPosition.z + State.InternalDisplacement.z,
       rocks: null,
+      cy: State.CoMPosition.y, cz: State.CoMPosition.z,
+      vx: State.CoMVelocity.x, vy: State.CoMVelocity.y, vz: State.CoMVelocity.z,
+      dy: State.InternalDisplacement.y, dz: State.InternalDisplacement.z,
+      ang: State.OrbitAngleRad, cr: State.CounterRotationRad, av: State.AngularVelocityRadPerSec,
+      fov: State.CurrentFOV,
+      a: Input.isAPressed, d: Input.isDPressed, sp: Input.isSpacePressed,
+      chg: State.bIsChargingKineticPush, pc: State.KineticPushCharge,
+      launch: State.RunPhase === 'LaunchPushOff', aim: State.LaunchAimAngleDeg, lc: State.LaunchPushCharge,
     };
     if (Tuning.ActiveScreenMode === 'ColossalBelt') {
       f.rocks = {};
@@ -1883,7 +1891,8 @@
 
   // --- Ghost replay: what you did (red) vs what would have worked (cyan) (§5) ---
   const Replay = { active: false, camPos: { x: 0, y: 0, z: 0 }, camVel: { x: 0, y: 0, z: 0 } };
-  const REPLAY_PRE_MS = 1500;
+  const REPLAY_BEFORE_IMPACT_MS = 5000;   // replay starts this long before the crash
+  const REPLAY_SLOW_BEFORE_ACTION_MS = 400;
   const REPLAY_SLOW_AFTER_ACTION_MS = 500;
   const REPLAY_AFTER_IMPACT_MS = 1000;
   const REPLAY_SLOW_FACTOR = 0.5;
@@ -1891,6 +1900,44 @@
 
   // Both paths at 30 Hz + the moving rocks, all on the sim clock. The cyan path is the real history up to the
   // action, then a silent re-run of the chosen move (the same physics the answer came from).
+  // The ship as the player saw it, from a history snapshot
+  function frameFromSnap(sample) {
+    const s = sample.snap;
+    s.body = sample.body;
+    return {
+      t: s.st.SimTimeMs, x: s.body.x, y: s.body.y, z: s.body.z,
+      cy: s.com.y, cz: s.com.z,
+      vx: s.vel.x, vy: s.vel.y, vz: s.vel.z, dy: s.disp.y, dz: s.disp.z,
+      ang: s.st.OrbitAngleRad, cr: s.st.CounterRotationRad, av: s.st.AngularVelocityRadPerSec, fov: s.st.CurrentFOV,
+      a: s.input.a, d: s.input.d, sp: s.input.space, chg: s.st.bIsChargingKineticPush, pc: s.st.KineticPushCharge,
+      launch: false, aim: 0, lc: 0,
+    };
+  }
+
+  const SHIP_NUM_KEYS = ['x', 'y', 'z', 'cy', 'cz', 'vx', 'vy', 'vz', 'dy', 'dz', 'av', 'fov', 'pc', 'aim', 'lc'];
+
+  // Interpolated ship frame (numbers lerped, spin angles along the short way, key states from the earlier frame)
+  function shipAt(frames, t, out) {
+    const n = frames.length;
+    let a, b, k = 0;
+    if (t <= frames[0].t) { a = b = frames[0]; }
+    else if (t >= frames[n - 1].t) { a = b = frames[n - 1]; }
+    else {
+      let i = frames._i || 0;
+      if (frames[i].t > t) i = 0;
+      while (i < n - 2 && frames[i + 1].t <= t) i++;
+      frames._i = i;
+      a = frames[i]; b = frames[i + 1];
+      k = (t - a.t) / Math.max(1e-6, b.t - a.t);
+    }
+    for (const key of SHIP_NUM_KEYS) out[key] = a[key] + (b[key] - a[key]) * k;
+    const wrap = (x, y) => { let dd = (y - x) % (2 * Math.PI); if (dd > Math.PI) dd -= 2 * Math.PI; if (dd < -Math.PI) dd += 2 * Math.PI; return x + dd * k; };
+    out.ang = wrap(a.ang, b.ang);
+    out.cr = a.cr + (b.cr - a.cr) * k;
+    out.a = a.a; out.d = a.d; out.sp = a.sp; out.chg = a.chg; out.launch = a.launch;
+    return out;
+  }
+
   function buildReplayData(job, ans) {
     const cand = ans.chosen.cand;
     const crash = job.crash;
@@ -1914,6 +1961,24 @@
       label = cand.charge === null ? "DON'T PUSH" : `PUSH ${roundPower(cand.charge)}%`;
     }
 
+    // Ship frames: real history up to the action, then the silent re-run of the chosen move
+    const ship = job.samples.filter(s => s.t <= actionT).map(s => frameFromSnap(s));
+    for (const f of frames) if (f.t > actionT) ship.push(f);
+    const holdMs = !r_isLaunch(cand) && cand.charge !== null ? cand.charge / Tuning.PushChargeRatePerSec * 1000 : 0;
+    let startT = Math.max(ship.length ? ship[0].t : 0, crash.simTimeMs - REPLAY_BEFORE_IMPACT_MS);
+    if (cand.family === 'launch') {
+      // before the launch the ship sits on the start rock: charge it up at the suggested aim
+      const lholdMs = cand.charge / Tuning.ChargeRatePerSec * 1000;
+      startT = actionT - lholdMs - 300;
+      const pre = [];
+      for (let t = startT; t < actionT; t += 1000 / 30) {
+        pre.push({ t, x: 0, y: 0, z: 0, cy: 0, cz: 0, vx: 0, vy: 0, vz: 0, dy: 0, dz: 0, ang: 0, cr: 0, av: 0, fov: 80,
+          a: false, d: false, sp: t >= actionT - lholdMs, chg: false, pc: 0, launch: true, aim: cand.aim,
+          lc: Math.max(0, Math.min(cand.charge, (t - (actionT - lholdMs)) / 1000 * Tuning.ChargeRatePerSec)) });
+      }
+      ship.unshift(...pre);
+    }
+
     const cyan = actual.filter(pt => pt.t <= actionT);
     for (const f of frames) if (f.t > actionT) cyan.push({ t: f.t, x: f.x, y: f.y, z: f.z });
     if (cyan.length < 2) cyan.push({ t: actionT + 1, x: actual[actual.length - 1].x, y: actual[actual.length - 1].y, z: actual[actual.length - 1].z });
@@ -1929,12 +1994,15 @@
     for (const f of frames) if (f.t > actionT && f.rocks) rocks.push({ t: f.t, m: f.rocks });
 
     return {
-      actual, cyan, rocks, actionT, label, anchorUid,
+      actual, cyan, rocks, actionT, label, anchorUid, ship, startT, holdMs,
+      holdRate: Tuning.PushChargeRatePerSec,
       crashT: crash.simTimeMs,
       charge: cand.family === 'launch' ? cand.charge : cand.charge,
       isLaunch: cand.family === 'launch',
     };
   }
+
+  function r_isLaunch(cand) { return cand.family === 'launch'; }
 
   function pathAt(path, t, out) {
     const n = path.length;
@@ -2025,14 +2093,20 @@
     const R = Replay;
     R.data = d;
     R.reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    R.t0 = Math.max(d.actual[0].t, d.actionT - REPLAY_PRE_MS);
+    R.t0 = d.startT;
     R.tEnd = d.crashT + REPLAY_AFTER_IMPACT_MS;
     R.t = R.t0;
     R.first = true;
     R.flash = null;
-    R.red = makeGhost(0xff3b5c);
-    R.cyan = makeGhost(0x00f0ff);
-    R.prevCyan = null;
+    R.saved = takeSnapshot();                     // crash-time state, put back when the replay ends
+    R.red = makeGhost(0xff3b5c);                  // what you did: ghost + trail
+    R.cyan = makeGhost(0x00f0ff);                 // what would have worked: trail only (the ship itself plays it)
+    R.cyan.group.visible = false;
+    R.camPos = State.CoMPosition;                 // the normal chase camera, following the real ship
+    R.camVel = State.CoMVelocity;
+    R.frame = {};
+    d.ship._i = 0;
+    plasmaTrailPositions = [];
     R.anchorObs = d.anchorUid ? findObstacleByUid(d.anchorUid) : null;
     R.rockMeshes = [];
     if (d.rocks.length) {
@@ -2047,6 +2121,7 @@
     if (hud) hud.classList.remove('hidden');
     const label = document.getElementById('replay-label');
     if (label) { label.textContent = d.label; label.classList.add('hidden'); }
+    R.keys = { a: document.getElementById('rk-a'), d: document.getElementById('rk-d'), sp: document.getElementById('rk-space'), bar: document.getElementById('rk-charge') };
     R.active = true;
     clearToasts();
     return true;
@@ -2054,27 +2129,40 @@
 
   function updateReplay(dt) {
     const R = Replay, d = R.data;
-    const slow = !R.reduced && R.t < d.actionT + REPLAY_SLOW_AFTER_ACTION_MS;
+    const slow = !R.reduced && R.t >= d.actionT - REPLAY_SLOW_BEFORE_ACTION_MS && R.t < d.actionT + REPLAY_SLOW_AFTER_ACTION_MS;
     R.t += dt * 1000 * (slow ? REPLAY_SLOW_FACTOR : 1);
     if (R.t >= R.tEnd) { stopCrashReplay(); return; }
 
     updateGhost(R.red, d.actual, R.t, d.crashT);
     updateGhost(R.cyan, d.cyan, R.t, R.tEnd);
 
-    // chase camera follows the suggested (cyan) ghost
-    pathAt(d.cyan, R.t, _rp);
-    const prev = R.prevCyan;
-    const simDt = prev ? Math.max(1, R.t - prev.t) / 1000 : 0;
-    if (prev && simDt > 0) {
-      R.camVel.x = (_rp.x - prev.x) / simDt; R.camVel.y = (_rp.y - prev.y) / simDt; R.camVel.z = (_rp.z - prev.z) / simDt;
-    } else {
-      R.camVel.x = 3000; R.camVel.y = 0; R.camVel.z = 0;
+    // The real ship plays the fix, seen through the normal chase camera
+    const f = shipAt(d.ship, R.t, R.frame);
+    let sp = f.sp, chg = f.chg, pc = f.pc;
+    if (d.holdMs > 0 && R.t >= d.actionT - d.holdMs && R.t <= d.actionT) {
+      // holding SPACE to wind up the suggested push
+      sp = true; chg = true;
+      pc = Math.min(d.charge, (R.t - (d.actionT - d.holdMs)) / 1000 * d.holdRate);
     }
-    R.prevCyan = { t: R.t, x: _rp.x, y: _rp.y, z: _rp.z };
-    R.camPos.x = _rp.x; R.camPos.y = _rp.y; R.camPos.z = _rp.z;
+    State.RunPhase = f.launch ? 'LaunchPushOff' : 'Running';
+    State.CoMPosition.x = f.x; State.CoMPosition.y = f.cy; State.CoMPosition.z = f.cz;
+    State.CoMVelocity.x = f.vx; State.CoMVelocity.y = f.vy; State.CoMVelocity.z = f.vz;
+    State.InternalDisplacement.y = f.dy; State.InternalDisplacement.z = f.dz;
+    State.OrbitAngleRad = f.ang; State.CounterRotationRad = f.cr; State.AngularVelocityRadPerSec = f.av;
+    State.HeldSpinDirection = f.a && !f.d ? 'CounterClockwise' : (f.d && !f.a ? 'Clockwise' : 'None');
+    State.bIsChargingKineticPush = chg; State.KineticPushCharge = pc;
+    State.LaunchAimAngleDeg = f.aim; State.LaunchPushCharge = f.lc;
+    State.CurrentFOV = f.fov; State.TargetFOV = f.fov;
+    State.CameraTrauma = 0;
     if (R.first) {
       R.first = false;
-      camera.position.set(_rp.x - State.CameraDistance, _rp.y * 0.45, _rp.z * 0.45 + 120);
+      camera.position.set(f.x - State.CameraDistance, f.cy * 0.45, f.cz * 0.45 + 120);
+    }
+    if (R.keys.a) {
+      R.keys.a.classList.toggle('on', !!f.a);
+      R.keys.d.classList.toggle('on', !!f.d);
+      R.keys.sp.classList.toggle('on', !!sp);
+      R.keys.bar.style.width = `${Math.round((f.launch ? f.lc : pc) * 100)}%`;
     }
 
     // moving rocks replay from the recorded tracks
@@ -2140,6 +2228,8 @@
     R.active = false;
     disposeGhost(R.red); disposeGhost(R.cyan);
     R.red = R.cyan = null;
+    if (R.saved) { restoreSnapshot(R.saved, true); R.saved = null; }
+    plasmaTrailPositions = [];
     if (R.flash) {
       scene.remove(R.flash.mesh);
       R.flash.mesh.geometry.dispose(); R.flash.mesh.material.dispose();

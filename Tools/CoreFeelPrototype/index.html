@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=9.2">
+  <link rel="stylesheet" href="style.css?v=9.3">
   <!-- Three.js for 3D Viewport & Cinematic Chase Camera -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
@@ -477,6 +477,11 @@
         <span class="replay-swatch cyan"></span>WHAT WOULD HAVE WORKED
       </div>
       <div class="replay-skip">ESC / SPACE TO SKIP</div>
+      <div class="replay-keys">
+        <span id="rk-a" class="rk">A</span>
+        <span id="rk-space" class="rk rk-wide">SPACE<i id="rk-charge"></i></span>
+        <span id="rk-d" class="rk">D</span>
+      </div>
     </div>
     <div id="replay-label" class="replay-label hidden"></div>
 
@@ -538,6 +543,6 @@
 
   </div>
 
-  <script src="app.js?v=9.2"></script>
+  <script src="app.js?v=9.3"></script>
 </body>
 </html>
