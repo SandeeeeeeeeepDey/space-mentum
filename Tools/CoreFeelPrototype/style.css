@@ -1591,7 +1591,11 @@ body[data-screen="title"] .center-crosshair { display: none; }
   border: 1px solid rgba(0, 240, 255, 0.7); border-radius: 4px; text-shadow: 0 0 10px rgba(0, 240, 255, 0.8); }
 .crash-tip { margin: 0 0 18px 0; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.12); }
 .crash-tip.hidden { display: none; }
-.crash-tip-head { font-size: 11px; letter-spacing: 0.18em; opacity: 0.55; margin-bottom: 8px; }
+.crash-tip { border-top: none; padding-top: 0; }
+.crash-tip-head { display: flex; align-items: center; gap: 10px; font-size: 11px; letter-spacing: 0.18em; opacity: 0.6; margin-bottom: 10px; white-space: nowrap; }
+.crash-tip-head::before, .crash-tip-head::after { content: ''; flex: 1; height: 1px; background: rgba(255, 255, 255, 0.25); }
+.tip-yes { color: var(--color-cyan); font-weight: 700; }
+.tip-no { color: var(--color-rose); font-weight: 700; }
 .crash-tip-text { margin: 0; font-size: 16px; line-height: 1.45; color: rgba(255, 255, 255, 0.9); }
 .crash-tip-text.pending { opacity: 0.55; }
 .crash-tip-text.failed { opacity: 0.55; }

@@ -1106,6 +1106,8 @@
     Analysis.token++;
     Analysis.status = 'idle';
     Analysis.result = null;
+    Analysis.replayData = null;
+    refreshWatchButton();
     if (Tuning.ActiveScreenMode === 'ColossalBelt') {
       State.RunPhase = 'Running';
       State.CoMPosition.x = 0.0; State.CoMPosition.y = 0.0; State.CoMPosition.z = 0.0;
@@ -1669,6 +1671,7 @@
     Analysis.job = null;
     if (!Settings.crashTips || !Hist.crash || Hist.samples.length === 0) {
       Analysis.status = 'off';
+      setCrashTip('', 'off');
       return;
     }
     Analysis.status = 'running';
@@ -2165,9 +2168,32 @@
     const block = document.getElementById('crash-tip');
     const el = document.getElementById('crash-tip-text');
     if (block) block.classList.toggle('hidden', !Settings.crashTips);
-    if (!el) return;
-    el.textContent = text;
-    el.className = `crash-tip-text ${variant || ''}`;
+    if (el) {
+      el.className = `crash-tip-text ${variant || ''}`;
+      el.textContent = '';
+      // "Yes." reads cyan, "No escape" rose
+      const lead = /^(Yes\.|No escape)/.exec(text);
+      if (lead) {
+        const span = document.createElement('span');
+        span.className = lead[1] === 'Yes.' ? 'tip-yes' : 'tip-no';
+        span.textContent = lead[1];
+        el.appendChild(span);
+        el.appendChild(document.createTextNode(text.slice(lead[1].length)));
+      } else {
+        el.textContent = text;
+      }
+    }
+    refreshWatchButton();
+  }
+
+  // ▶ WATCH is offered only when there is a move to show
+  function refreshWatchButton() {
+    const btn = document.getElementById('btn-crash-watch');
+    if (!btn) return;
+    const show = Settings.crashTips && Analysis.status === 'done' && !!Analysis.replayData;
+    if (btn.classList.contains('hidden') === !show) return;
+    btn.classList.toggle('hidden', !show);
+    if (UI.screen === 'results' && UI.resultsModal === 'crash-modal') selectMenuItem(UI.menuIndex);
   }
 
   // --- Fixed 120Hz Physics Tick ---
@@ -5302,6 +5328,7 @@
       case 'quit':
       case 'menu': quitToTitle(); break;
       case 'watch': startCrashReplay(); break;
+      case 'crashtips': toggleCrashTips(); break;
       case 'next': loadSector(State.CurrentSectorIndex < 3 ? State.CurrentSectorIndex + 1 : 1); break;
     }
   }
@@ -5374,6 +5401,10 @@
       if (item && item.dataset && screen === 'title' && !UI.sub) {
         e.preventDefault();
         if (cycleTitleOption(item.dataset.action, key === 'arrowleft' ? -1 : 1)) playMenuBlip(false);
+      } else if (item && item.dataset && item.dataset.action === 'crashtips') {
+        e.preventDefault();
+        toggleCrashTips();
+        playMenuBlip(false);
       }
     } else if (key === 'enter') {
       const item = items[UI.menuIndex];
@@ -5386,6 +5417,17 @@
   }
 
   // --- Audio settings (menu sliders mirror the dev-drawer sliders; persisted to localStorage) ---
+  function syncCrashTipsUI() {
+    const el = document.getElementById('set-crashtips-val');
+    if (el) el.textContent = Settings.crashTips ? 'ON' : 'OFF';
+  }
+
+  function toggleCrashTips() {
+    Settings.crashTips = !Settings.crashTips;
+    syncCrashTipsUI();
+    saveSettings();
+  }
+
   function syncAudioUI() {
     for (const [menuId, prop, menuValId, drawerId, drawerValId] of AUDIO_SETTINGS) {
       const pct = Math.round(Tuning[prop] * 100);
@@ -5402,6 +5444,7 @@
     try {
       const data = {};
       for (const [, prop] of AUDIO_SETTINGS) data[prop] = Tuning[prop];
+      data.crashTips = Settings.crashTips;
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
     } catch (e) {}
   }
@@ -5414,9 +5457,11 @@
           const v = parseFloat(data[prop]);
           if (isFinite(v)) Tuning[prop] = Math.max(0, Math.min(1, v));
         }
+        if (typeof data.crashTips === 'boolean') Settings.crashTips = data.crashTips;
       }
     } catch (e) {}
     syncAudioUI();
+    syncCrashTipsUI();
   }
 
   function setupMenus() {
