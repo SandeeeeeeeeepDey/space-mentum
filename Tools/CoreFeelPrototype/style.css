@@ -1579,6 +1579,13 @@ body[data-screen="title"] .center-crosshair { display: none; }
   margin-bottom: 22px;
 }
 
+.crash-tip { margin: 0 0 18px 0; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.12); }
+.crash-tip.hidden { display: none; }
+.crash-tip-head { font-size: 11px; letter-spacing: 0.18em; opacity: 0.55; margin-bottom: 8px; }
+.crash-tip-text { margin: 0; font-size: 16px; line-height: 1.45; color: rgba(255, 255, 255, 0.9); }
+.crash-tip-text.pending { opacity: 0.55; }
+.crash-tip-text.failed { opacity: 0.55; }
+
 .results-stats {
   display: flex;
   justify-content: space-around;

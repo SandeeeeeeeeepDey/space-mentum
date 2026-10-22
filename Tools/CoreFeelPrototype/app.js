@@ -308,10 +308,13 @@
     seq: 0,
   };
 
+  // Player-facing options (persisted with the other settings)
+  const Settings = { crashTips: true };
+
   // --- Replayable Sim: silent re-runs of the real physics (crash analysis, §2 of PLAN_CrashEscapeHint) ---
   // While Sim.silent is true nothing may touch audio, DOM or scene objects; end-of-run triggers
   // only record Sim.outcome.
-  const Sim = { silent: false, outcome: null, saved: null, override: null };
+  const Sim = { silent: false, outcome: null, saved: null, override: null, ignoreVoid: false, voidSeen: false };
 
   const SIM_DT = 1 / 120;          // fixed physics step (real game and silent re-runs alike)
   const HIST_SAMPLE_STEPS = 4;     // one history snapshot per 1/30 s
@@ -978,6 +981,11 @@
   // --- Rule 3 Fail State Triggers ---
   function triggerVoidDoom(snapshot) {
     if (State.RunPhase !== 'Running') return;
+    if (Sim.silent && Sim.ignoreVoid) {
+      // Crash analysis keeps flying a doomed line so it can still tell whether the rock was avoided
+      Sim.voidSeen = true;
+      return;
+    }
     State.RunPhase = 'LostToTheVoid';
     if (Sim.silent) {
       Sim.outcome = { type: 'void', simTimeMs: State.SimTimeMs, obstacle: null };
@@ -1008,6 +1016,7 @@
 
     playCrashSound();
     State.CameraTrauma = 1.0;
+    startCrashAnalysis();
 
     const speedEl = document.getElementById('crash-speed-val');
     if (speedEl) speedEl.textContent = `${Math.round(impactSpeed * 0.036)} km/h`;
@@ -1088,6 +1097,9 @@
     simAccumulator = 0;
     Input.seq = 0; Input.lastAPressTime = 0; Input.lastDPressTime = 0;
     resetHistory();
+    Analysis.token++;
+    Analysis.status = 'idle';
+    Analysis.result = null;
     if (Tuning.ActiveScreenMode === 'ColossalBelt') {
       State.RunPhase = 'Running';
       State.CoMPosition.x = 0.0; State.CoMPosition.y = 0.0; State.CoMPosition.z = 0.0;
@@ -1360,6 +1372,8 @@
     Sim.saved = null;
     Sim.outcome = null;
     Sim.override = null;
+    Sim.ignoreVoid = false;
+    Sim.voidSeen = false;
   }
 
   function withSilent(fn) {
@@ -1369,6 +1383,19 @@
     } finally {
       exitSilent();
     }
+  }
+
+  // "Do nothing from here": let go of everything the player could be holding. Unlike clearHeldInput this keeps the
+  // push that just fired (arm reach, anchor) intact, so the consequences of that push play out.
+  function releaseHeldControls() {
+    Input.isAPressed = false;
+    Input.isDPressed = false;
+    Input.isSpacePressed = false;
+    State.HeldSpinDirection = 'None';
+    State.bIsChargingPush = false;
+    State.bIsChargingKineticPush = false;
+    State.LaunchPushCharge = 0.0;
+    State.KineticPushCharge = 0.0;
   }
 
   // Step the real sim from the current (restored) state to untilMs, replaying recorded input events
@@ -1388,7 +1415,7 @@
       simStep(SIM_DT);
       if (Sim.override && Sim.override.done && !cut) {
         cut = true;
-        clearHeldInput();
+        releaseHeldControls();
       }
       if (onStep && onStep() === true) break;
     }
@@ -1423,6 +1450,403 @@
     const el = document.getElementById('replay-check-result');
     if (el) el.textContent = pass ? `PASS (${dtMs.toFixed(2)} ms, ${distCm.toFixed(3)} cm)` : `FAIL (${result.outcome}, ${dtMs.toFixed(2)} ms, ${distCm.toFixed(2)} cm)`;
     return result;
+  }
+
+  // --- Crash Debrief: "could you have made it?" (PLAN_CrashEscapeHint §3-4) ---
+  // After a crash the history is rewound and the REAL physics is re-run silently with one different move.
+  // Shown only on the results card, never during play (Rule 4 "Blind Math" still holds in flight).
+  const Analysis = { token: 0, status: 'idle', result: null, job: null };
+
+  const ANALYSIS_SLICE_MS = 8;
+  const ANALYSIS_BUDGET_MS = 1500;
+  const ANALYSIS_TAIL_MS = 2000;                       // judge each candidate this long past the original impact
+  const PUSH_CHARGES = [0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0];
+  const LAUNCH_CHARGES = [0.4, 0.7, 1.0];
+  const LAUNCH_AIM_STEP_DEG = 2.5;
+  const MAX_CHANGED_PUSHES = 3;                        // most recent real pushes tried with other charges
+
+  // Rocks the body could push off right now (surface within reach), nearest first
+  function listPushAnchors(maxCount) {
+    const body = getPushBodyPos();
+    const found = [];
+    for (const obs of getPushCandidates()) {
+      if (obs.destroyed) continue;
+      const c = getPushObstacleCenter(obs);
+      if (Math.abs(c.x - body.x) > Tuning.PushReachCm + obs.radius) continue;
+      const d = c.distanceTo(body) - obs.radius;
+      if (d <= Tuning.PushReachCm) found.push({ obs, d });
+    }
+    found.sort((a, b) => a.d - b.d);
+    return found.slice(0, maxCount).map(f => f.obs);
+  }
+
+  // Distance from the body to the nearest rock surface (no allocations: runs every sim step of every candidate)
+  function simClearance() {
+    const bx = State.CoMPosition.x;
+    const by = State.CoMPosition.y + State.InternalDisplacement.y;
+    const bz = State.CoMPosition.z + State.InternalDisplacement.z;
+    const list = Tuning.ActiveScreenMode === 'ColossalBelt' ? colossalIncomingAsteroids : denseObstacles;
+    let m = Infinity;
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i];
+      if (o.destroyed) continue;
+      const c = o.position || o.mesh.position;
+      const dx = c.x - bx;
+      if (dx > 2500 || dx < -2500) continue;
+      const dy = c.y - by, dz = c.z - bz;
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz) - o.radius;
+      if (d < m) m = d;
+    }
+    return m;
+  }
+
+  function lastSampleAtOrBefore(samples, t) {
+    let best = null;
+    for (const s of samples) {
+      if (s.t <= t) best = s; else break;
+    }
+    return best;
+  }
+
+  function describeObstacle(obs) {
+    if (!obs) return 'rock';
+    if (obs.massKg) return String(obs.name || 'asteroid').toLowerCase(); // Colossal rocks carry designations
+    return obs.isAsteroid === false ? 'debris' : 'rock';
+  }
+
+  // Can the player hold SPACE for charge c ending at endT? Needs the time to exist after the run began and not run
+  // through another real release (that earlier push would not have happened). ignoreFromMs skips the real hold being replaced.
+  function holdFeasible(job, endT, charge, ignoreFromMs) {
+    const startT = endT - (charge / Tuning.PushChargeRatePerSec) * 1000 - 1;
+    if (startT < job.runStartMs) return false;
+    for (const e of job.releaseEvents) {
+      if (e.t > startT && e.t < endT && !(ignoreFromMs !== undefined && e.t >= ignoreFromMs)) return false;
+    }
+    return true;
+  }
+
+  // Candidate moves, most useful first. Runs inside silent mode (it restores samples to look for anchors).
+  function* candidateStream(job) {
+    // 1. "Change your push": same moment, other power (or none) - for the most recent real pushes
+    const pushes = job.pushEvents;
+    for (let i = pushes.length - 1; i >= Math.max(0, pushes.length - MAX_CHANGED_PUSHES); i--) {
+      const pe = pushes[i];
+      const sample = lastSampleAtOrBefore(job.samples, pe.t);
+      if (!sample) continue;
+      const upEv = job.inputEvents.filter(e => e.name === 'spaceUp' && e.t <= pe.t).pop();
+      const downEv = upEv ? job.inputEvents.filter(e => e.name === 'spaceDown' && e.t <= upEv.t).pop() : null;
+      for (const ch of [null].concat(PUSH_CHARGES)) {
+        if (ch !== null && Math.abs(ch - pe.charge) < 0.04) continue;
+        if (ch !== null && upEv && !holdFeasible(job, upEv.t, ch, downEv ? downEv.t : upEv.t)) continue;
+        yield { family: 'change', sample, eventT: pe.t, actual: pe.charge, anchorUid: pe.anchorUid, charge: ch };
+      }
+    }
+    // 2. "Push off X at t": every history sample with a rock in reach, latest first
+    for (let si = job.samples.length - 1; si >= 0; si--) {
+      const sample = job.samples[si];
+      restoreSnapshot(sample.snap);
+      const anchors = listPushAnchors(1); // the one-button push always picks the nearest rock in reach
+      for (const a of anchors) {
+        for (const ch of PUSH_CHARGES) {
+          if (!holdFeasible(job, sample.t, ch)) continue;
+          yield { family: 'push', sample, anchorUid: a.uid, charge: ch };
+        }
+      }
+    }
+    // 3. "Change the launch": only when the launch is inside the window and nothing above worked
+    if (job.prelaunch && job.launch && job.crash.simTimeMs - job.launch.simTimeMs <= HIST_WINDOW_MS &&
+        !job.successes.some(s => s.cand.family !== 'launch')) {
+      const actual = job.prelaunch.launch;
+      for (let aim = -Tuning.MaxAimAngleDeg; aim <= Tuning.MaxAimAngleDeg + 1e-6; aim += LAUNCH_AIM_STEP_DEG) {
+        for (const ch of LAUNCH_CHARGES) {
+          if (Math.abs(aim - actual.aim) < LAUNCH_AIM_STEP_DEG * 0.5 && Math.abs(ch - actual.charge) < 0.15) continue;
+          yield { family: 'launch', aim, charge: ch };
+        }
+      }
+    }
+  }
+
+  // Re-run the real sim from the candidate's moment, apply the one different move, then do nothing.
+  function evalCandidate(job, c) {
+    Sim.outcome = null;
+    Sim.override = null;
+    let events = null;
+    if (c.family === 'launch') {
+      restoreSnapshot(job.prelaunch);
+      State.LaunchAimAngleDeg = c.aim;
+      State.LaunchPushCharge = c.charge;
+      State.bIsChargingPush = true;
+      fireLaunchPush();
+    } else {
+      restoreSnapshot(c.sample.snap);
+      if (c.family === 'push') {
+        clearHeldInput(); // spin stops, nothing is held
+        const anchor = findObstacleByUid(c.anchorUid);
+        if (!anchor) return null;
+        executePushOff(anchor, c.charge);
+      } else {
+        Sim.override = { atMs: c.eventT, charge: c.charge, done: false };
+        events = job.inputEvents;
+      }
+    }
+    let minClear = Infinity;
+    simAdvance(job.tEnd, events, () => {
+      const m = simClearance();
+      if (m < minClear) minClear = m;
+    });
+    // "Good" = still on course afterwards: the existing doom lookahead must not call it lost
+    Sim.voidSeen = false;
+    if (!Sim.outcome && State.RunPhase === 'Running' && Tuning.ActiveScreenMode !== 'ColossalBelt') {
+      evaluateBackgroundDoomLookahead();
+    }
+    const o = Sim.outcome;
+    Sim.override = null;
+    return {
+      escape: !(o && o.type === 'crash'),
+      good: !(o && o.type === 'crash') && !Sim.voidSeen,
+      margin: minClear,
+      outcome: o ? o.type : 'none',
+    };
+  }
+
+  function makeAnalysisJob() {
+    const crash = Hist.crash;
+    const obs = findObstacleByUid(crash.obstacleUid);
+    const events = Hist.events.slice();
+    const job = {
+      token: Analysis.token,
+      crash,
+      samples: Hist.samples.slice(),
+      inputEvents: events.filter(e => e.type === 'input'),
+      releaseEvents: events.filter(e => e.type === 'input' && (e.name === 'spaceUp' || e.name === 'clear')),
+      runStartMs: Hist.launch ? Hist.launch.simTimeMs : 0,
+      pushEvents: events.filter(e => e.type === 'pushRelease'),
+      prelaunch: Hist.prelaunch,
+      launch: Hist.launch,
+      tEnd: crash.simTimeMs + ANALYSIS_TAIL_MS,
+      crashObs: obs,
+      crashThing: obs ? describeObstacle(obs) : (crash.obstacleName ? crash.obstacleName.toLowerCase() : 'rock'),
+      mode: Tuning.ActiveScreenMode,
+      successes: [],
+      evaluated: 0,
+      finished: false,
+      aborted: false,
+      t0: performance.now(),
+    };
+    job.gen = candidateStream(job);
+    return job;
+  }
+
+  function startCrashAnalysis() {
+    Analysis.token++;
+    Analysis.result = null;
+    Analysis.job = null;
+    if (!Settings.crashTips || !Hist.crash || Hist.samples.length === 0) {
+      Analysis.status = 'off';
+      return;
+    }
+    Analysis.status = 'running';
+    setCrashTip('Checking…', 'pending');
+    const job = makeAnalysisJob();
+    Analysis.job = job;
+    scheduleAnalysisSlice(job);
+  }
+
+  function scheduleAnalysisSlice(job) {
+    let fired = false;
+    const go = () => {
+      if (fired) return;
+      fired = true;
+      runAnalysisSlice(job);
+    };
+    requestAnimationFrame(go);
+    setTimeout(go, 40); // rAF doesn't fire in hidden tabs
+  }
+
+  function runAnalysisSlice(job) {
+    if (job.token !== Analysis.token) return; // retried / left the card: drop it
+    try {
+      runAnalysisFor(job, ANALYSIS_SLICE_MS);
+    } catch (err) {
+      console.error('[CRASH TIP] analysis failed', err);
+      job.failed = true;
+    }
+    if (job.finished || job.aborted || job.failed) finishAnalysis(job);
+    else scheduleAnalysisSlice(job);
+  }
+
+  // Evaluate candidates for up to sliceMs of wall time (Infinity = run to completion, used by tests)
+  function runAnalysisFor(job, sliceMs) {
+    const start = performance.now();
+    withSilent(() => {
+      Sim.ignoreVoid = true;
+      while (performance.now() - start < sliceMs) {
+        const nx = job.gen.next();
+        if (nx.done) { job.finished = true; return; }
+        job.evaluated++;
+        const res = evalCandidate(job, nx.value);
+        if (res && res.escape) job.successes.push(Object.assign({ cand: nx.value }, res));
+        if (performance.now() - job.t0 > ANALYSIS_BUDGET_MS) { job.aborted = true; return; }
+      }
+    });
+  }
+
+  function roundPower(c) { return Math.round(c * 20) * 5; }
+  function roundSeconds(ms) { return (Math.round(ms / 100) / 10).toFixed(1); }
+
+  // Which way the rock lies as seen from the chase camera (looks down +X; screen right = +Z, up = +Y)
+  function screenSide(from, to) {
+    const dy = to.y - from.y, dz = to.z - from.z;
+    if (Math.abs(dz) >= Math.abs(dy)) return dz >= 0 ? 'right' : 'left';
+    return dy >= 0 ? 'above' : 'below';
+  }
+
+  // Earliest moment (most time to react: the rock has just lit up) at which the push also works over the
+  // next two history samples, so the advice survives a human's ~0.07 s of timing jitter.
+  // entries: successful push candidates against one rock. Returns { t, entries } (entries valid at t).
+  function robustPushWindow(job, entries) {
+    const sampleTimes = job.samples.map(s => s.t);
+    const idx = new Map(sampleTimes.map((t, i) => [t, i]));
+    const byT = new Map();
+    for (const e of entries) {
+      const t = e.cand.sample.t;
+      if (!byT.has(t)) byT.set(t, []);
+      byT.get(t).push(e);
+    }
+    const times = Array.from(byT.keys()).sort((a, b) => a - b);
+    for (const t of times) {
+      const i = idx.get(t);
+      let ok = new Set(byT.get(t).map(e => e.cand.charge));
+      for (let k = 1; k <= 2; k++) {
+        const nt = sampleTimes[i + k];
+        if (nt === undefined) break;
+        const here = new Set((byT.get(nt) || []).map(e => e.cand.charge));
+        ok = new Set(Array.from(ok).filter(c => here.has(c)));
+      }
+      if (ok.size) return { t, entries: byT.get(t).filter(e => ok.has(e.cand.charge)) };
+    }
+    const latest = times[times.length - 1]; // only isolated hits: fall back to the last one
+    return { t: latest, entries: byT.get(latest) };
+  }
+
+  function preferGood(list) {
+    const good = list.filter(s => s.good);
+    return good.length ? good : list;
+  }
+
+  // First matching rule wins (§4.4). Returns { kind, text, chosen }.
+  function chooseAnswer(job) {
+    const crashT = job.crash.simTimeMs;
+    const S = job.successes;
+    const holdNote = (c) => c >= 0.6 ? ` (start holding SPACE about ${(c / Tuning.PushChargeRatePerSec).toFixed(1)} s earlier)` : '';
+
+    // 1. Your own push caused it
+    const lastPush = job.pushEvents[job.pushEvents.length - 1];
+    if (lastPush) {
+      const pool = preferGood(S.filter(s => s.cand.family === 'change' && s.cand.eventT === lastPush.t));
+      if (pool.length) {
+        const dist = (s) => Math.abs((s.cand.charge === null ? 0 : s.cand.charge) - lastPush.charge);
+        pool.sort((a, b) => dist(a) - dist(b) || b.margin - a.margin);
+        const best = pool[0];
+        const actual = roundPower(lastPush.charge);
+        const text = best.cand.charge === null
+          ? `Your push (${actual}%) sent you into it. Not pushing would have cleared it.`
+          : `Your push (${actual}%) sent you into it. About ${roundPower(best.cand.charge)}% would have cleared it${holdNote(best.cand.charge)}.`;
+        return { kind: 'ownPush', text, chosen: best };
+      }
+    }
+
+    // 2. Push off the obstacle that was hit
+    const pushS = S.filter(s => s.cand.family === 'push');
+    const hitPool = preferGood(pushS.filter(s => s.cand.anchorUid === job.crash.obstacleUid));
+    if (hitPool.length) {
+      const win = robustPushWindow(job, hitPool);
+      const latest = win.t;
+      const atLatest = win.entries;
+      const charges = atLatest.map(s => s.cand.charge);
+      const cMin = Math.min(...charges), cMax = Math.max(...charges);
+      let power;
+      if (cMin === cMax) power = `at about ${roundPower(cMin)}% power`;
+      else if (cMax >= 1.0) power = `with ${roundPower(cMin)}% power or more`;
+      else power = `with between ${roundPower(cMin)}% and ${roundPower(cMax)}% power`;
+      const best = atLatest.slice().sort((a, b) => b.margin - a.margin)[0];
+      const text = `Yes. Push off the ${job.crashThing} you hit when it lit up, ${roundSeconds(crashT - latest)} s before impact, ${power}${holdNote(cMin)}.`;
+      return { kind: 'hitRock', text, chosen: best };
+    }
+
+    // 3. Push off a different obstacle (largest margin)
+    const otherPool = preferGood(pushS.filter(s => s.cand.anchorUid !== job.crash.obstacleUid));
+    if (otherPool.length) {
+      const top = otherPool.slice().sort((a, b) => b.margin - a.margin)[0];
+      const win = robustPushWindow(job, otherPool.filter(s => s.cand.anchorUid === top.cand.anchorUid));
+      const best = win.entries.slice().sort((a, b) => b.margin - a.margin)[0];
+      const sample = best.cand.sample;
+      const obs = (restoreSnapshot(sample.snap), findObstacleByUid(best.cand.anchorUid));
+      const side = obs ? screenSide(sample.body, getPushObstacleCenter(obs)) : 'side';
+      const text = `Yes. Push off the ${describeObstacle(obs)} on your ${side}, ${roundSeconds(crashT - sample.t)} s before impact, at about ${roundPower(best.cand.charge)}% power${holdNote(best.cand.charge)}.`;
+      return { kind: 'otherRock', text, chosen: best };
+    }
+
+    // 4. Launch differently
+    const launchPool = preferGood(S.filter(s => s.cand.family === 'launch'));
+    if (launchPool.length && job.prelaunch) {
+      const actual = job.prelaunch.launch;
+      const cost = (s) => Math.abs(s.cand.aim - actual.aim) + (Math.abs(s.cand.charge - actual.charge) > 0.15 ? 100 : 0);
+      launchPool.sort((a, b) => cost(a) - cost(b) || b.margin - a.margin);
+      const best = launchPool[0];
+      const aimTxt = (a) => `${a > 0 ? '+' : ''}${a.toFixed(1)}`;
+      let text = `Launch at ${aimTxt(best.cand.aim)}° instead of ${aimTxt(actual.aim)}° to miss it.`;
+      if (Math.abs(best.cand.charge - actual.charge) > 0.15) {
+        text = `Launch at ${aimTxt(best.cand.aim)}° with ${roundPower(best.cand.charge)}% power instead of ${aimTxt(actual.aim)}° at ${roundPower(actual.charge)}% to miss it.`;
+      }
+      return { kind: 'launch', text, chosen: best };
+    }
+
+    // 5. Nothing worked
+    const covered = Math.max(1, Math.round((crashT - job.samples[0].t) / 1000));
+    return {
+      kind: 'none',
+      text: `No escape in the last ${covered} s. Your line was set before that — try a different route earlier.`,
+      chosen: null,
+    };
+  }
+
+  function finishAnalysis(job) {
+    job.ms = performance.now() - job.t0;
+    if (job.failed || (job.aborted && job.successes.length === 0)) {
+      Analysis.status = 'failed';
+      Analysis.result = { kind: 'failed', text: "Couldn't check this one", chosen: null };
+      setCrashTip(Analysis.result.text, 'failed');
+    } else {
+      const ans = withSilent(() => chooseAnswer(job));
+      Analysis.status = 'done';
+      Analysis.result = ans;
+      setCrashTip(ans.text, ans.kind === 'none' ? 'none' : 'yes');
+    }
+    console.log(`[CRASH TIP] ${Analysis.result.kind}: ${Analysis.result.text} (${job.evaluated} candidates, ${job.successes.length} escapes, ${job.ms.toFixed(0)} ms${job.aborted ? ', aborted' : ''})`);
+  }
+
+  // Run the whole analysis synchronously (tests / dev console)
+  function analyzeCrashSync() {
+    if (!Hist.crash) return null;
+    Analysis.token++;
+    const job = makeAnalysisJob();
+    Analysis.job = job;
+    runAnalysisFor(job, Infinity);
+    job.ms = performance.now() - job.t0;
+    const ans = withSilent(() => chooseAnswer(job));
+    Analysis.status = 'done';
+    Analysis.result = ans;
+    return { ans, job };
+  }
+
+  function setCrashTip(text, variant) {
+    const block = document.getElementById('crash-tip');
+    const el = document.getElementById('crash-tip-text');
+    if (block) block.classList.toggle('hidden', !Settings.crashTips);
+    if (!el) return;
+    el.textContent = text;
+    el.className = `crash-tip-text ${variant || ''}`;
   }
 
   // --- Fixed 120Hz Physics Tick ---
@@ -4991,7 +5415,8 @@
     if (/[?&]dev=1/.test(window.location.search)) {
       window.__sm = { State, Input, Sim, Hist, Tuning, applyInputEvent, runReplayCheck, restartRun, setScreenMode,
         loadSector, getDense: () => denseObstacles, getColossal: () => colossalIncomingAsteroids, UI,
-        showScreen, startRunFromTitle, simStep };
+        showScreen, startRunFromTitle, simStep, getCamera: () => camera, rebaseHistory: () => { Hist.samples.length = 0; Hist.events.length = 0; Hist.prelaunch = null; recordHistorySample(); }, Analysis, analyzeCrashSync, chooseAnswer, Settings,
+        restoreSnapshot, takeSnapshot, withSilent, simAdvance, findObstacleByUid };
     }
   }
 
