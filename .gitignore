@@ -40,7 +40,7 @@ Thumbs.db
 .DS_Store
 desktop.ini
 
-
- GAME_DESIGN_DOCUMENT.md
- PROGRESS.md
- update.md
+GAME_DESIGN_DOCUMENT.md
+PROGRESS.md
+update.md
+Docs/*
